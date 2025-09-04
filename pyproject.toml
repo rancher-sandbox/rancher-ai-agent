@@ -1,0 +1,14 @@
+[project]
+name = "mcpws"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.116.1",
+    "langchain-google-genai>=2.1.10",
+    "langchain-mcp-adapters>=0.1.9",
+    "langchain-ollama>=0.3.6",
+    "langgraph>=0.6.4",
+    "mcp>=1.12.4",
+]
