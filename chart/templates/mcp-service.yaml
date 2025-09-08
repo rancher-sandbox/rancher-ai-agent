@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rancher-mcp-server
+  namespace: cattle-ai-system
+spec:
+  selector:
+    app: rancher-mcp-server
+  ports:
+    - port: 80
+      name: http
+      targetPort: 9090
+      protocol: TCP
+  type: ClusterIP

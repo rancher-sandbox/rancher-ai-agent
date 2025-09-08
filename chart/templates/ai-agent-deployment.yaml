@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: rancher-ai-agent
+  name: rancher-ai-agent
+  namespace: cattle-ai-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rancher-ai-agent
+  template:
+    metadata:
+      labels:
+        app: rancher-ai-agent
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - image: "{{ .Values.aiAgent.image.repository }}:{{ .Values.aiAgent.image.tag }}"
+        imagePullPolicy: "{{ .Values.aiAgent.image.pullPolicy }}"
+        name: agent
+        env:
+          - name: GOOGLE_API_KEY
+            value: "{{ .Values.aiAgent.googleApiKey }}"
+        ports:
+         - containerPort: 8000

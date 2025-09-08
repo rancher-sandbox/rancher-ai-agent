@@ -1,0 +1,38 @@
+aiAgent:
+  image:
+    repository: ghcr.io/rancher-sandbox/rancher-ai-agent
+    tag: v0.0.1-alpha.1
+    pullPolicy: IfNotPresent
+mcp:
+  image:
+    repository: ghcr.io/rancher-sandbox/rancher-ai-mcp
+    tag: v0.0.1-alpha.4
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: [] # Default to an empty list
+
+ingress:
+  # If set to false, ingress will not be created
+  # Defaults to true
+  # options: true, false
+  enabled: true
+  includeDefaultExtraAnnotations: true
+  extraAnnotations: {}
+  ingressClassName: ""
+  # Certain ingress controllers will require the pathType or path to be set to a different value.
+  pathType: ImplementationSpecific
+  # Backend port number; should use either: 80, or 443.
+  # Must use 443 when `service.disableHTTP` is set to true.
+  servicePort: 80
+
+  # configurationSnippet - Add additional Nginx configuration. This example statically sets a header on the ingress.
+  # configurationSnippet: |
+  #   more_set_input_headers "X-Forwarded-Host: {{ .Values.hostname }}";
+
+  tls:
+    # options: rancher, letsEncrypt, secret
+    source: rancher
+    secretName: tls-rancher-ingress
+
+certmanager:
+  version: ""
