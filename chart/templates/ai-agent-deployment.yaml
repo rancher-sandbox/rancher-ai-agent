@@ -4,7 +4,7 @@ metadata:
   labels:
     app: rancher-ai-agent
   name: rancher-ai-agent
-  namespace: cattle-ai-system
+  namespace: cattle-ai-agent-system
 spec:
   replicas: 1
   selector:
@@ -24,7 +24,30 @@ spec:
         imagePullPolicy: "{{ .Values.aiAgent.image.pullPolicy }}"
         name: agent
         env:
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: OPENAI_API_KEY
+          - name: MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: MODEL
+          - name: OLLAMA_URL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: OLLAMA_URL
           - name: GOOGLE_API_KEY
-            value: "{{ .Values.aiAgent.googleApiKey }}"
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: GOOGLE_API_KEY
+          - name: SYSTEM_PROMPT
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: SYSTEM_PROMPT
         ports:
          - containerPort: 8000
