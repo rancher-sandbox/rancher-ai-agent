@@ -4,7 +4,7 @@ metadata:
   labels:
     app: rancher-mcp-server
   name: rancher-mcp-server
-  namespace: cattle-ai-system
+  namespace: cattle-ai-agent-system
 spec:
   replicas: 1
   selector:
