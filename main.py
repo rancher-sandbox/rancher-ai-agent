@@ -3,7 +3,7 @@ import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama
@@ -11,67 +11,37 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from agents import create_k8s_agent, Context
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse import Langfuse
-from langgraph.prebuilt import create_react_agent
-from langfuse.langchain import CallbackHandler
-from langgraph.types import interrupt, Command
-from typing import Callable
-from langchain_core.tools import BaseTool, tool as create_tool
-from langchain_core.runnables import RunnableConfig
-from langgraph.types import interrupt
-from langgraph.prebuilt.interrupt import HumanInterruptConfig, HumanInterrupt
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 from langchain_openai import OpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
+from contextlib import asynccontextmanager
 
 # Configure logging to show INFO level messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-app = FastAPI()
+init_config = {}
 
-def add_human_in_the_loop(
-    tool: Callable | BaseTool,
-    *,
-    interrupt_config: HumanInterruptConfig = None,
-) -> BaseTool:
-    """Wrap a tool to support human-in-the-loop review."""
-    if not isinstance(tool, BaseTool):
-        tool = create_tool(tool)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        init_config["llm"] = get_llm()
+    except ValueError as e:
+        logging.error(e)
+    yield
+    init_config.clear()
 
-    if interrupt_config is None:
-        interrupt_config = {
-            "allow_accept": True,
-            "allow_edit": True,
-            "allow_respond": True,
-        }
-
-    @create_tool(  # (1)!
-        tool.name,
-        description=tool.description,
-        args_schema=tool.args_schema
-    )
-    async def call_tool_with_interrupt(config: RunnableConfig, **tool_input):
-        request: HumanInterrupt = {
-            "action_request": {
-                "action": tool.name,
-                "args": tool_input
-            },
-            "config": interrupt_config,
-            "description": "The following patch is going to be applied in the cluster. \n "+str(tool_input["patch"])+"\nWARNING! This can't be reverted! Confirm? (yes/no)"
-        }
-        response = interrupt([request])   # (2)!
-        # approve the tool call
-        if response["type"] == "yes":
-            tool_response = await tool.ainvoke(tool_input, config)
-        else:
-            return "the tool execution was not approved by the user."
-
-        return tool_response
-
-    return call_tool_with_interrupt
-
-
+app = FastAPI(lifespan=lifespan)
 
 @app.websocket("/agent/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for the agent.
+    
+    Accepts a WebSocket connection, sets up the agent and
+    handles the back-and-forth communication with the client.
+    """
+
     await websocket.accept()
     cookies = websocket.cookies
     url = "https://"+websocket.url.hostname
@@ -87,62 +57,35 @@ async def websocket_endpoint(websocket: WebSocket):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await load_mcp_tools(session)
-            tools = [add_human_in_the_loop(t) if t.name == "patchKubernetesResource" else t for t in tools]
-
-            #langfuse_handler = CallbackHandler()
-            try:
-                llm = get_llm()
-            except ValueError as e:
-                logging.error(e)
-                await websocket.send_text(f"<message>") #TODO check with UI how to handle errors. This will change!
-                await websocket.send_text(f"ERROR: {e}")
-                await websocket.send_text(f"</message>")
+            # langfuse_handler = CallbackHandler()
             checkpointer = InMemorySaver()
-            agent = create_k8s_agent(llm, tools, checkpointer, system_prompt= get_system_prompt())
+            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
             config = {
     #            "callbacks": [langfuse_handler],
                 "thread_id": "thread-1"
             }
-            context = {}
             try:
+                # `context` is a dictionary used to store default values for tool parameters.
+                context = {}
                 while True:
                     data = await websocket.receive_text()
                     if (context_tuple := is_context_message(data)) is not None:
                         key, value = context_tuple
                         context[key] = value
                     else:
-                        await websocket.send_text(f"<message>")
-                        async for event, data in agent.astream(
-                            {"messages": [{"role": "user", "content": data}],},
+                        await stream_agent_response(
+                            agent=agent,
+                            input_data={"messages": [{"role": "user", "content": data}]},
                             config=config,
-                            stream_mode=["updates", "messages"],
-                            context=Context(context=context)
-                        ):
-                            if event == "messages":
-                                chunk, metadata = data 
-                                if metadata["langgraph_node"] == "agent" and chunk.content != "":
-                                    await websocket.send_text(chunk.content)
-                            if event == "updates": # TODO move human validation to graph?
-                                if (interrupt_value := data.get('__interrupt__')) is not None:
-                                    await websocket.send_text(interrupt_value[0].value[0]["description"])
-                                    response = await websocket.receive_text()
-                                    await websocket.send_text(f"<message>")
-                                    # resume after interrupt
-                                    async for event, data in agent.astream(
-                                        Command(resume={"type": response}),  
-                                        config,
-                                        stream_mode=["updates", "messages"],
-                                        context=Context(context=context)
-                                    ):
-                                        if event == "messages":
-                                            chunk, metadata = data 
-                                            if metadata["langgraph_node"] == "agent" and chunk.content != "":
-                                                await websocket.send_text(chunk.content)
-                                    await websocket.send_text(f"</message>")
-                        await websocket.send_text(f"</message>")
+                            websocket=websocket,
+                            context=context)
             except WebSocketDisconnect:
                 logging.info(f"Client {websocket.client.host} disconnected.")
+            except Exception as e:
+                logging.error(f"An error occurred: {e}")
+                await websocket.close()
 
+# This is the UI for testing. This will be replaced by the UI extension
 @app.get("/agent")
 async def get(request: Request):
     """Serves the main HTML page for the chat client."""
@@ -153,8 +96,64 @@ async def get(request: Request):
 
     return HTMLResponse(modified_html)
 
+async def stream_agent_response(
+    agent: CompiledStateGraph,
+    input_data: dict[str, list[dict[str, str]]],
+    config: dict,
+    websocket: WebSocket,
+    context: dict,
+    stream_mode: list[str] = ["updates", "messages"]
+) -> None:
+    """
+    Streams the agent's response to a WebSocket connection, handling interruptions.
+    
+    Args:
+        agent: The compiled LangGraph agent.
+        input_data: The input data for the agent's run.
+        config: The run configuration.
+        websocket: The WebSocket connection.
+        context: The context for default tool parameter values.
+        stream_mode: The types of events to stream from the agent.
+    """
+
+    await websocket.send_text("<message>")
+    try:
+        async for event, data in agent.astream(
+            input_data,
+            config=config,
+            stream_mode=stream_mode,
+            context=Context(context=context)
+        ):
+            if event == "messages":
+                chunk, metadata = data
+                if metadata.get("langgraph_node") == "agent" and chunk.content:
+                    await websocket.send_text(chunk.content)
+            elif event == "updates":
+                if interrupt_value := data.get("__interrupt__"):
+                    await websocket.send_text(interrupt_value[0].value)
+                    # Receive user response for the human verification
+                    user_response = await websocket.receive_text()
+                    await stream_agent_response(
+                        agent=agent,
+                        input_data=Command(resume={"response": user_response}),
+                        config=config,
+                        websocket=websocket,
+                        context=context,
+                        stream_mode=stream_mode)
+    finally:
+        await websocket.send_text("</message>")
+
 def is_context_message(message: str) -> tuple[str, str]  | None:
-    # Check for the tags first
+    """
+    Checks if a message is a special context message.
+    
+    Args:
+        message: The raw message string from the WebSocket.
+        
+    Returns:
+        A tuple of (key, value) if it's a context message, otherwise None.
+    """
+
     if not (message.startswith("<mcp_context>") and message.endswith("</mcp_context>")):
         return None
 
@@ -172,6 +171,16 @@ def is_context_message(message: str) -> tuple[str, str]  | None:
     return (key, value)
 
 def get_llm() -> BaseLanguageModel:
+    """
+    Selects and returns a language model instance based on environment variables.
+    
+    Returns:
+        An instance of a language model.
+        
+    Raises:
+        ValueError: If no supported model or API key is configured.
+    """
+
     model = os.environ.get("MODEL")
     if not model:
         raise ValueError("Model not configured.")
@@ -191,6 +200,17 @@ def get_llm() -> BaseLanguageModel:
     raise ValueError("LLM not configured.")
 
 def get_system_prompt() -> str:
+    """
+    Retrieves the system prompt for the AI agent.
+
+    The function first attempts to get the prompt from an environment variable
+    named "SYSTEM_PROMPT". If the environment variable is not set, it returns
+    a default, hard-coded prompt.
+
+    Returns:
+        str: The system prompt to be used by the AI agent.
+    """
+
     prompt = os.environ.get("SYSTEM_PROMPT")
     if prompt:
         return prompt

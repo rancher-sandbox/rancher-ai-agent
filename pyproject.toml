@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "asyncio>=4.0.0",
     "fastapi[standard]>=0.116.1",
     "langchain>=0.3.27",
     "langchain-google-genai>=2.1.10",
@@ -15,4 +16,7 @@ dependencies = [
     "langgraph>=0.6.4",
     "langgraph-supervisor>=0.0.29",
     "mcp>=1.12.4",
+    "mock>=5.2.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
 ]
