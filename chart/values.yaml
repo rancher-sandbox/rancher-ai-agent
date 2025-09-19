@@ -1,12 +1,17 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-agent
-    tag: v0.0.1-alpha.2
+    tag: v0.0.1-alpha.3
     pullPolicy: IfNotPresent
 mcp:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-mcp
-    tag: v0.0.1-alpha.5
+    tag: v0.0.1-alpha.6
     pullPolicy: IfNotPresent
 
 imagePullSecrets: [] # Default to an empty list
+
+llmModel:
+ollamaUrl:
+googleApiKey:
+openaiApiKey:

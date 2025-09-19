@@ -7,6 +7,6 @@ type: Opaque
 stringData:
   OPENAI_API_KEY: "{{ .Values.openaiApiKey }}"
   SYSTEM_PROMPT: "{{ .Values.systemPrompt }}"
-  MODEL: "{{ .Values.model }}"
+  MODEL: "{{ .Values.llmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
