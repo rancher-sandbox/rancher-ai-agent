@@ -1,43 +1,53 @@
 > :warning: Warning! This project is in its very early stages of development. Expect frequent changes and potential breaking updates as we iterate on features and architecture.
 
-Installation
-The recommended way to install the AI Agent is by using the provided Helm chart.
+# AI Assistant for Rancher
 
-1. Clone the repository:
+## Architecture
 
-2. Configure Container Registry Access:
+The system is composed of a **UI Extension** for user interaction, a **ReAct Agent** for intelligent decision-making, and an **MCP Server** that acts as the intermediary between the agent and the Rancher API. 
 
-The container images are hosted in a private GitHub Container Registry (ghcr.io). You need to provide your GitHub credentials to allow Kubernetes to pull the images.
+### [ReAct Agent](https://github.com/rancher-sandbox/rancher-ai-agent)
 
-Create a Kubernetes secret named gh-secret with your credentials:
+The **ReAct Agent** is the orchestrator of the system’s intelligence. It leverages a **Large Language Model (LLM)** as its **reasoning engine**, while the agent itself provides the structure, coordination, and secure execution of actions.
 
-```
-kubectl create secret docker-registry gh-secret \
-  --docker-server=ghcr.io \
-  --docker-username=<YOUR_GITHUB_USERNAME> \
-  --docker-password=<YOUR_PERSONAL_ACCESS_TOKEN> \
-  --docker-email=<YOUR_EMAIL> \
-  --namespace cattle-ai-agent-system
-```
+#### 🧠 LLM (Reasoning Engine)
+- Interprets user inputs expressed in natural language.  
+- Performs the **reasoning**: breaks down complex requests into smaller steps.  
+- Decides what should happen next (keep reasoning vs. take action).  
+- Synthesizes outputs from tools into clear, human-readable responses.  
 
-Note: For the docker-password, you must use a Personal Access Token (PAT) from your GitHub account, not your regular password. The PAT needs the read:packages scope.
+#### ⚙️ Agent (Orchestrator)
+- Wraps the LLM with the **ReAct (Reason + Act)**
+- Decides when to let the LLM keep reasoning or when to **act** on its instructions.  
+- Calls external tools (via the MCP Server) as directed by the LLM.  
+- Ensures secure interactions by passing the user’s Rancher token to the MCP server for authentication and authorization.  
 
-3. Install with Helm:
+#### [MCP Server](https://github.com/rancher-sandbox/rancher-ai-mcp)
 
-Finally, use Helm to install the agent from the local chart directory. This command will create the cattle-ai-agent-system namespace if it doesn't already exist. 
+The **MCP Server** acts as a secure, controlled gateway between the ReAct Agent and the Rancher and Kubernetes APIs. Its functions include:
 
-```bash
-helm install ai-agent chart --namespace cattle-ai-agent-system --create-namespace --set "imagePullSecrets[0].name=gh-secret" --set ollamaUrl=http://ollama-url --set model=qwen3:1.7b
-```
+  * **Exposing Tools**: It provides a set of well-defined, safe tools (API endpoints) that the ReAct Agent can call. These tools abstract away the complexity of direct Rancher/Kubernetes API interactions.
+  * **Interaction with Rancher**: It translates tool calls from the agent into the appropriate API requests to the Rancher management server, retrieving or modifying resources as needed.
 
-The previous installation command configures Ollama. To use OpenAI or Gemini, you can either:
+### UI Extension
 
-- Edit the llm-settings secret after installation. This require to restart the pod.
-- Supply different values when installing the chart.
+The **UI Extension** provides the user-facing chat interface within the Rancher dashboard. It is designed to be a seamless part of the Rancher experience and is responsible for:
 
-The temporary UI can be accessed in https://your-rancher-url/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent
-This UI will be replaced by the UI extension
+  * **User Input**: It captures user queries and sends them to the ReAct Agent.
+  * **Displaying Responses**: It receives responses from the ReAct Agent and presents them in a chat-like format.
 
+## How It Works (Flow)
+
+1. **User Request → LLM**  
+   The user submits a natural language query through the UI Extension.  
+2. **LLM Reasoning**  
+   The LLM interprets the request, reasons about the problem, and proposes a plan.  
+3. **Agent Acting**  
+   If the plan requires external operations, the agent calls the appropriate MCP Server tools.  
+4. **LLM Response Formulation**  
+   The LLM takes the tool outputs and crafts a coherent, human-readable response.  
+5. **Response → User**  
+   The answer is returned to the user through the UI Extension.  
 
 
 
