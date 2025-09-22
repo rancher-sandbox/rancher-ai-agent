@@ -1,9 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from langgraph.types import interrupt
+from unittest.mock import AsyncMock, MagicMock, patch
 from agents import create_k8s_agent
-from langchain_core.messages import BaseMessage
-from langchain_core.tools import StructuredTool
 
 class FakeMessage:
     def __init__(self, tool_calls=None):
@@ -40,6 +37,7 @@ def test_bind_tools(mock_llm, mock_tools):
     mock_llm.bind_tools.assert_called_once_with(mock_tools)
 
 @pytest.mark.asyncio
+@patch("langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
 async def test_tool_node_executes_tool_human_verification_cancelled(mock_llm, mock_tools):
     workflow = create_k8s_agent(
         llm=mock_llm,
@@ -54,18 +52,12 @@ async def test_tool_node_executes_tool_human_verification_cancelled(mock_llm, mo
     }
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
 
-    interrupt_mock = MagicMock(return_value={"response": "no"})
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("langgraph.types.interrupt", interrupt_mock)
-
     result = await tool_node.ainvoke(state)
 
     assert result["messages"] == "the tool execution was cancelled by the user."
 
-    monkeypatch.undo() 
-
-
 @pytest.mark.asyncio
+@patch("langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
 async def test_tool_node_executes_tool_human_verification_approved(mock_llm, mock_tools):
     workflow = create_k8s_agent(
         llm=mock_llm,
@@ -80,19 +72,12 @@ async def test_tool_node_executes_tool_human_verification_approved(mock_llm, moc
     }
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
 
-    interrupt_mock = MagicMock(return_value={"response": "yes"})
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("langgraph.types.interrupt", interrupt_mock)
-
-
     result = await tool_node.ainvoke(state)
 
     assert isinstance(result["messages"], list)
     assert result["messages"][0].name == "patchKubernetesResource"
     assert result["messages"][0].tool_call_id == "123"
     assert result["messages"][0].content == fake_patch_tool_execution_message
-
-    monkeypatch.undo() 
 
 @pytest.mark.asyncio
 async def test_tool_node_executes_tool(mock_llm, mock_tools):
