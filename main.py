@@ -44,10 +44,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
     cookies = websocket.cookies
-    scheme = "https"
-    if websocket.url.scheme == "ws":
-        scheme = "http"
-    rancher_url = scheme+"://"+websocket.url.hostname+":"+str(websocket.url.port)
+    rancher_url = "https://"+websocket.url.hostname
+    if websocket.url.port:
+        rancher_url += ":"+str(websocket.url.port)
 
     async with streamablehttp_client(
         url="http://rancher-mcp-server",
@@ -94,9 +93,7 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-    
-    #modified_html = html_content.replace("{{ url }}", request.url.hostname)
-    modified_html = html_content.replace("{{ url }}", "localhost:8000")
+    modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
     return HTMLResponse(modified_html)
 
