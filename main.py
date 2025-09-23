@@ -44,13 +44,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
     cookies = websocket.cookies
-    url = "https://"+websocket.url.hostname
+    rancher_url = "https://"+websocket.url.hostname
+    if websocket.url.port:
+        rancher_url += ":"+str(websocket.url.port)
 
     async with streamablehttp_client(
         url="http://rancher-mcp-server",
         headers={
              "R_token":str(cookies.get("R_SESS")),
-             "R_url":url
+             "R_url":rancher_url
              }
     ) as (read, write, _):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
@@ -91,7 +93,6 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-    
     modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
     return HTMLResponse(modified_html)
