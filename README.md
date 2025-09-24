@@ -38,7 +38,7 @@ The **UI Extension** provides the user-facing chat interface within the Rancher 
 
 ## How It Works (Flow)
 
-1. **User Request → LLM**  
+1. **User Request → Agent → LLM**  
    The user submits a natural language query through the UI Extension.  
 2. **LLM Reasoning**  
    The LLM interprets the request, reasons about the problem, and proposes a plan.  
