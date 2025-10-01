@@ -10,3 +10,5 @@ stringData:
   MODEL: "{{ .Values.llmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
+  ENABLE_RAG: "{{ .Values.rag.enabled }}"
+  EMBEDDINGS_MODEL: "{{ .Values.rag.embeddings_model }}"
