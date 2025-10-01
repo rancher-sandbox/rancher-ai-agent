@@ -1,4 +1,5 @@
 import os
+import json
 from typing import (
     Annotated,
     Sequence,
@@ -6,8 +7,9 @@ from typing import (
 )
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.config import get_stream_writer
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -18,6 +20,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.embeddings import Embeddings
 
 from langgraph.runtime import Runtime
+from typing_extensions import Literal
 import langgraph.types 
 from dataclasses import dataclass
 from typing import Dict
@@ -113,9 +116,12 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
                     return {"messages": "the tool execution was cancelled by the user."}
             try:
                 tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+                json_result = json.loads(tool_result)
+                writer = get_stream_writer()  
+                writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
                 outputs.append(
                     ToolMessage(
-                        content=tool_result,
+                        content=json_result["llm"],
                         name=tool_call["name"],
                         tool_call_id=tool_call["id"])
                 )
