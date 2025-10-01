@@ -33,6 +33,7 @@ class Context:
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    summary: str
 
 def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     """
