@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -87,20 +88,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 "thread_id": "thread-1"
             }
             try:
-                # `context` is a dictionary used to store default values for tool parameters.
-                context = {}
                 while True:
-                    data = await websocket.receive_text()
-                    if (context_tuple := is_context_message(data)) is not None:
-                        key, value = context_tuple
-                        context[key] = value
-                    else:
-                        await stream_agent_response(
-                            agent=agent,
-                            input_data={"messages": [{"role": "user", "content": data}]},
-                            config=config,
-                            websocket=websocket,
-                            context=context)
+                    request = await websocket.receive_text()
+                    json_request = json.loads(request)
+                    context = {}
+                    if "context" in json_request:
+                        context = json_request["context"]
+                    await stream_agent_response(
+                        agent=agent,
+                        input_data={"messages": [{"role": "user", "content": json_request["prompt"]}]},
+                        config=config,
+                        websocket=websocket,
+                        context=context)
             except WebSocketDisconnect:
                 logging.info(f"Client {websocket.client.host} disconnected.")
             except Exception as e:
@@ -123,7 +122,6 @@ async def stream_agent_response(
     config: dict,
     websocket: WebSocket,
     context: dict,
-    stream_mode: list[str] = ["updates", "messages"]
 ) -> None:
     """
     Streams the agent's response to a WebSocket connection, handling interruptions.
@@ -142,14 +140,14 @@ async def stream_agent_response(
         async for event, data in agent.astream(
             input_data,
             config=config,
-            stream_mode=stream_mode,
+            stream_mode=["updates", "messages", "custom"],
             context=Context(context=context)
         ):
             if event == "messages":
                 chunk, metadata = data
                 if metadata.get("langgraph_node") == "agent" and chunk.content:
                     await websocket.send_text(chunk.content)
-            elif event == "updates":
+            if event == "updates":
                 if interrupt_value := data.get("__interrupt__"):
                     await websocket.send_text(interrupt_value[0].value)
                     # Receive user response for the human verification
@@ -159,8 +157,9 @@ async def stream_agent_response(
                         input_data=Command(resume={"response": user_response}),
                         config=config,
                         websocket=websocket,
-                        context=context,
-                        stream_mode=stream_mode)
+                        context=context)
+            if event == "custom":
+                await websocket.send_text(data)
     finally:
         await websocket.send_text("</message>")
 
