@@ -17,7 +17,7 @@ googleApiKey:
 openaiApiKey:
 # Enable RAG with embedded rancher documentation
 rag:
-    enabled: true
+    enabled: false
     # Select an embeddings model from https://python.langchain.com/docs/integrations/text_embedding/#all-embedding-models
     # OpenAI example: "text-embedding-3-large"
     # Gemini example: "models/gemini-embedding-001"
