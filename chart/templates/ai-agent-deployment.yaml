@@ -49,5 +49,15 @@ spec:
               secretKeyRef:
                 name: llm-config
                 key: SYSTEM_PROMPT
+          - name: ENABLE_RAG
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: ENABLE_RAG
+          - name: EMBEDDINGS_MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: EMBEDDINGS_MODEL
         ports:
          - containerPort: 8000

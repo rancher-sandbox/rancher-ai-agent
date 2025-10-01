@@ -1,17 +1,24 @@
 aiAgent:
   image:
-    repository: ghcr.io/rancher-sandbox/rancher-ai-agent
-    tag: v0.0.1-alpha.6
-    pullPolicy: IfNotPresent
+    repository: jpgouin/rancher-ai-agent
+    tag: v1-rc12
+    pullPolicy: Always
 mcp:
   image:
-    repository: ghcr.io/rancher-sandbox/rancher-ai-mcp
-    tag: v0.0.1-alpha.6
-    pullPolicy: IfNotPresent
+    repository: jpgouin/rancher-ai-mcp
+    tag: v1
+    pullPolicy: Always
 
 imagePullSecrets: [] # Default to an empty list
 
-llmModel:
-ollamaUrl:
+llmModel: "qwen3:8b"
+ollamaUrl: "https://42720c58b137.ngrok.app"
 googleApiKey:
 openaiApiKey:
+# Enable RAG with embedded rancher documentation
+rag:
+    enabled: true
+    # Select an embeddings model from https://python.langchain.com/docs/integrations/text_embedding/#all-embedding-models
+    # OpenAI example: "text-embedding-3-large"
+    # Gemini example: "models/gemini-embedding-001"
+    embeddings_model: "qwen3-embedding:0.6b"
