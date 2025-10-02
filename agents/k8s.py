@@ -58,6 +58,9 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
 
         if tool_call["name"] == "patchKubernetesResource":
             return f"The following patch: {tool_call['args']['patch']} will be applied in the {tool_call['args']['name']} {tool_call['args']['kind']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+        if tool_call["name"] == "createKubernetesResource":
+            return f"The following resource: {tool_call['args']['resource']} will be applied in the {tool_call['args']['namespace']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+
         return ""
     
     async def tool_node(state: AgentState):
@@ -80,12 +83,20 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
                     return {"messages": "the tool execution was cancelled by the user."}
             try:
                 tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
-                json_result = json.loads(tool_result)
-                writer = get_stream_writer()  
-                writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
+                try:
+                    json_result = json.loads(tool_result)
+                    if "uiContext" in json_result:
+                        writer = get_stream_writer()  
+                        await writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
+                    if "llm" in json_result:
+                        result = json_result["llm"]
+                    else:
+                        result = json_result
+                except Exception:
+                    result = tool_result
                 outputs.append(
                     ToolMessage(
-                        content=json_result["llm"],
+                        content=result,
                         name=tool_call["name"],
                         tool_call_id=tool_call["id"])
                 )

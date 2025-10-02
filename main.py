@@ -17,6 +17,7 @@ from langgraph.types import Command
 from langchain_openai import OpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
+from langfuse.langchain import CallbackHandler
 
 # Configure logging to show INFO level messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,7 +29,8 @@ async def lifespan(app: FastAPI):
     try:
         init_config["llm"] = get_llm()
     except ValueError as e:
-        logging.error(e)
+        logging.critical(e)
+        raise e
     yield
     init_config.clear()
 
@@ -60,23 +62,26 @@ async def websocket_endpoint(websocket: WebSocket):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await load_mcp_tools(session)
-            # langfuse_handler = CallbackHandler()
+           # langfuse_handler = CallbackHandler()
             checkpointer = InMemorySaver()
             agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
             config = {
-    #            "callbacks": [langfuse_handler],
+         #       "callbacks": [langfuse_handler],
                 "thread_id": "thread-1"
             }
             try:
                 while True:
                     request = await websocket.receive_text()
-                    json_request = json.loads(request)
                     context = {}
-                    if "context" in json_request:
+                    try:
+                        json_request = json.loads(request)
                         context = json_request["context"]
+                        prompt = json_request["prompt"]
+                    except json.JSONDecodeError:
+                        prompt = request
                     await stream_agent_response(
                         agent=agent,
-                        input_data={"messages": [{"role": "user", "content": json_request["prompt"]}]},
+                        input_data={"messages": [{"role": "user", "content": prompt}]},
                         config=config,
                         websocket=websocket,
                         context=context)
@@ -143,33 +148,6 @@ async def stream_agent_response(
     finally:
         await websocket.send_text("</message>")
 
-def is_context_message(message: str) -> tuple[str, str]  | None:
-    """
-    Checks if a message is a special context message.
-    
-    Args:
-        message: The raw message string from the WebSocket.
-        
-    Returns:
-        A tuple of (key, value) if it's a context message, otherwise None.
-    """
-
-    if not (message.startswith("<mcp_context>") and message.endswith("</mcp_context>")):
-        return None
-
-    content = message.removeprefix("<mcp_context>").removesuffix("</mcp_context>")
-    equal_sign_pos = content.find("=")
-    
-    if equal_sign_pos == -1:
-        # No key-value pair found
-        return None
-    
-    # Split the string into key and value
-    key = content[:equal_sign_pos]
-    value = content[equal_sign_pos + 1:]
-    
-    return (key, value)
-
 def get_llm() -> BaseLanguageModel:
     """
     Selects and returns a language model instance based on environment variables.
@@ -183,7 +161,7 @@ def get_llm() -> BaseLanguageModel:
 
     model = os.environ.get("MODEL")
     if not model:
-        raise ValueError("Model not configured.")
+        raise ValueError("LLM Model not configured.")
 
     ollama_url = os.environ.get("OLLAMA_URL")
     if ollama_url:
