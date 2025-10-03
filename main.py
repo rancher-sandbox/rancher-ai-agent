@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -12,17 +13,38 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from agents import create_k8s_agent, Context
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse import Langfuse
+from langgraph.store.memory import InMemoryStore
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from langchain_openai import OpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
 from langfuse.langchain import CallbackHandler
+from datetime import datetime
 
 # Configure logging to show INFO level messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
+user_threads = {}
+checkpointer = InMemorySaver()
+in_memory_store = InMemoryStore()
+
+def new_thread(user_id: str) -> str:
+    """Start a new conversation thread for a user."""
+    thread_id = str(uuid.uuid4())
+    if user_id not in user_threads:
+        user_threads[user_id] = {}
+    user_threads[user_id][thread_id] = {"timestamp": datetime.now()}
+
+    return thread_id
+
+def add_prompt_to_history(user_id: str, thread_id: str, prompt: str):
+    """Add a prompt to the conversation history."""
+    if user_id in user_threads:
+        if thread_id in user_threads[user_id]:
+            if "prompt" not in user_threads[user_id][thread_id]:
+                user_threads[user_id][thread_id]["prompt"] = prompt
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,7 +66,8 @@ async def websocket_endpoint(websocket: WebSocket):
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-
+    thread_id = websocket.query_params.get("thread_id")
+    user_id = websocket.query_params.get("user_id")
     await websocket.accept()
     cookies = websocket.cookies
     rancher_url = "https://"+websocket.url.hostname
@@ -52,22 +75,27 @@ async def websocket_endpoint(websocket: WebSocket):
         rancher_url += ":"+str(websocket.url.port)
 
     async with streamablehttp_client(
-        url="http://rancher-mcp-server",
+        url="http://localhost:9092",
         headers={
-             "R_token":str(cookies.get("R_SESS")),
-             "R_url":rancher_url
+             "R_token":"token-kktp6:bc4fvr6m8knmnbnxc2wr7rrsl2f6tv26mn9qbxshxzlh6jqvngnkq6",
+             "R_url":"https://raul-cabello.ngrok.app"
              }
     ) as (read, write, _):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await load_mcp_tools(session)
-           # langfuse_handler = CallbackHandler()
-            checkpointer = InMemorySaver()
-            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
+            langfuse_handler = CallbackHandler()
+            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer, store=in_memory_store)
+
+            if user_id is None:
+                    user_id = "anonymous"
+            if thread_id is None:
+                thread_id = new_thread(user_id)
+
             config = {
-         #       "callbacks": [langfuse_handler],
-                "thread_id": "thread-1"
+                "callbacks": [langfuse_handler],
+                "thread_id": thread_id
             }
             try:
                 while True:
@@ -79,9 +107,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         prompt = json_request["prompt"]
                     except json.JSONDecodeError:
                         prompt = request
+
+                    add_prompt_to_history(user_id, thread_id, prompt)
+
                     await stream_agent_response(
                         agent=agent,
-                        input_data={"messages": [{"role": "user", "content": prompt}]},
+                        input_data={"messages": [{"role": "user", "content": prompt}], "messages_history": prompt},
                         config=config,
                         websocket=websocket,
                         context=context)
@@ -97,9 +128,17 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-    modified_html = html_content.replace("{{ url }}", request.url.hostname)
+    modified_html = html_content.replace("{{ url }}", "localhost:8000")
 
     return HTMLResponse(modified_html)
+
+@app.get("/history")
+async def get(request: Request):
+    return user_threads
+
+@app.get("/history/{user_id}/{thread_id}")
+async def read_history(user_id: str, thread_id: str):
+    return checkpointer.get(config={"configurable": {"user_id": user_id, "thread_id": thread_id}})
 
 async def stream_agent_response(
     agent: CompiledStateGraph,

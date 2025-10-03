@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import (
     Annotated,
     Sequence,
@@ -15,6 +16,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.runtime import Runtime
 from typing_extensions import Literal
+from langgraph.graph import END
 import langgraph.types 
 from dataclasses import dataclass
 from typing import Dict
@@ -27,6 +29,7 @@ class Context:
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    messages_history: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
 def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str) -> CompiledStateGraph:
@@ -129,7 +132,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
             messages_to_send.append(context_prompt)
         response = llm_with_tools.invoke(messages_to_send + state["messages"], config)
 
-        return {"messages": [response]}
+        return {"messages": [response], "messages_history": [response]}
 
     # Define the conditional edge that determines whether to continue or not
     def should_continue(state: AgentState):
@@ -145,23 +148,47 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         messages = state["messages"]
         last_message = messages[-1]
         if not last_message.tool_calls:
+            logging.info(f"len: {len(messages)}")
+            if len(messages) > 6:
+                return "summarize_conversation"
             return "end"
         else:
             return "continue"
+        
+    def summarize_conversation(state: AgentState):
+        summary = state.get("summary", "")
+        if summary:
+            summary_message = (
+                f"This is summary of the conversation to date: {summary}\n"
+                "Extend the summary by taking into account the new messages above:" )
+        else:
+            summary_message = "Create a summary of the conversation above:"
+
+        # Add prompt to our history
+        messages = state["messages"] + [HumanMessage(content=summary_message)]
+        response = llm_with_tools.invoke(messages)
+        logging.info(f"summary: {response.content}")
+        
+        # Delete all but the 2 most recent messages
+        delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-2]]
+        return {"summary": response.content, "messages": delete_messages}
 
     workflow = StateGraph(AgentState)
 
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
+    workflow.add_node("summarize_conversation", summarize_conversation)
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {
             "continue": "tools",
+            "summarize_conversation": "summarize_conversation",
             "end": END,
         },
     )
     workflow.add_edge("tools", "agent")
+    workflow.add_edge("summarize_conversation", END)
 
     return workflow
