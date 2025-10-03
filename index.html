@@ -20,7 +20,25 @@
         </form>
         <script>
             // Establish a WebSocket connection
-            const ws = new WebSocket("wss://{{ url }}/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent/ws");
+            const params = new URLSearchParams(window.location.search);
+            const threadId = params.get("thread_id");
+            const userId = params.get("user_id");
+            let wsUrl = `wss://{{ url }}/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent/ws`;
+            let protocol = ""
+            if (userId) {
+                protocol = userId // TODO! currently passing the userId and threadId using the Sec-WebSocket-Protocol header because k8s proxy service won't pass query string parameters https://github.com/kubernetes/kubernetes/issues/77142 
+               // wsUrl += `/?user_id=${encodeURIComponent(userId)}`;
+                if (threadId) {
+                   // wsUrl += `&thread_id=${encodeURIComponent(threadId)}`;
+                    protocol += `_${threadId}`
+                }
+            }
+            let ws
+            if (protocol) {
+                ws = new WebSocket(wsUrl, protocol);
+            } else {
+                 ws = new WebSocket(wsUrl);
+            }
 
             ws.onopen = function(event) {
                 console.log("WebSocket connection established.");
