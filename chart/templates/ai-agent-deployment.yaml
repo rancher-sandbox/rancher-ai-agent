@@ -59,5 +59,20 @@ spec:
               secretKeyRef:
                 name: llm-config
                 key: EMBEDDINGS_MODEL
+          - name: LANGFUSE_PUBLIC_KEY
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: LANGFUSE_PUBLIC_KEY
+          - name: LANGFUSE_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: LANGFUSE_SECRET_KEY
+          - name: LANGFUSE_HOST
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: LANGFUSE_HOST
         ports:
          - containerPort: 8000

@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -12,6 +13,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from agents import create_k8s_agent, Context, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse import Langfuse
+from langgraph.store.memory import InMemoryStore
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from langchain_openai import OpenAI
@@ -24,6 +26,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 
 
+from langfuse.langchain import CallbackHandler
+from datetime import datetime
 
 # Configure logging to show INFO level messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -44,7 +48,8 @@ async def lifespan(app: FastAPI):
                 "Search and return relevant passages from local Rancher/SUSE documentation.",
             )
     except ValueError as e:
-        logging.error(e)
+        logging.critical(e)
+        raise e
     yield
     init_config.clear()
 
@@ -58,7 +63,7 @@ async def websocket_endpoint(websocket: WebSocket):
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-
+  
     await websocket.accept()
     cookies = websocket.cookies
     rancher_url = "https://"+websocket.url.hostname
@@ -75,28 +80,34 @@ async def websocket_endpoint(websocket: WebSocket):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
         async with ClientSession(read, write) as session:
             await session.initialize()
+            thread_id = str(uuid.uuid4())
             tools = await load_mcp_tools(session)
-            # langfuse_handler = CallbackHandler()
-
+            
             # if ENABLE_RAG is true, add the retriever tool to the tools list
             if os.environ.get("ENABLE_RAG", "false").lower() == "true":
                 tools = [init_config["retriever_tool"]] + tools
+            langfuse_handler = CallbackHandler()
             checkpointer = InMemorySaver()
             agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
             config = {
-    #            "callbacks": [langfuse_handler],
-                "thread_id": "thread-1"
+                "callbacks": [langfuse_handler],
+                "thread_id": thread_id
             }
+
             try:
                 while True:
                     request = await websocket.receive_text()
-                    json_request = json.loads(request)
                     context = {}
-                    if "context" in json_request:
+                    try:
+                        json_request = json.loads(request)
                         context = json_request["context"]
+                        prompt = json_request["prompt"]
+                    except json.JSONDecodeError:
+                        prompt = request
+
                     await stream_agent_response(
                         agent=agent,
-                        input_data={"messages": [{"role": "user", "content": json_request["prompt"]}]},
+                        input_data={"messages": [{"role": "user", "content": prompt}]},
                         config=config,
                         websocket=websocket,
                         context=context)
@@ -112,8 +123,8 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-    modified_html = html_content.replace("{{ url }}", request.url.hostname)
-    
+        modified_html = html_content.replace("{{ url }}", request.url.hostname)
+
     return HTMLResponse(modified_html)
 
 async def stream_agent_response(
@@ -163,33 +174,6 @@ async def stream_agent_response(
     finally:
         await websocket.send_text("</message>")
 
-def is_context_message(message: str) -> tuple[str, str]  | None:
-    """
-    Checks if a message is a special context message.
-    
-    Args:
-        message: The raw message string from the WebSocket.
-        
-    Returns:
-        A tuple of (key, value) if it's a context message, otherwise None.
-    """
-
-    if not (message.startswith("<mcp_context>") and message.endswith("</mcp_context>")):
-        return None
-
-    content = message.removeprefix("<mcp_context>").removesuffix("</mcp_context>")
-    equal_sign_pos = content.find("=")
-    
-    if equal_sign_pos == -1:
-        # No key-value pair found
-        return None
-    
-    # Split the string into key and value
-    key = content[:equal_sign_pos]
-    value = content[equal_sign_pos + 1:]
-    
-    return (key, value)
-
 def get_llm() -> BaseLanguageModel:
     """
     Selects and returns a language model instance based on environment variables.
@@ -203,7 +187,7 @@ def get_llm() -> BaseLanguageModel:
 
     model = os.environ.get("MODEL")
     if not model:
-        raise ValueError("Model not configured.")
+        raise ValueError("LLM Model not configured.")
 
     ollama_url = os.environ.get("OLLAMA_URL")
     if ollama_url:

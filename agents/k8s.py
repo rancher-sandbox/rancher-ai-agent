@@ -21,6 +21,7 @@ from langchain_core.embeddings import Embeddings
 
 from langgraph.runtime import Runtime
 from typing_extensions import Literal
+from langgraph.graph import END
 import langgraph.types 
 from dataclasses import dataclass
 from typing import Dict
@@ -95,6 +96,9 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
 
         if tool_call["name"] == "patchKubernetesResource":
             return f"The following patch: {tool_call['args']['patch']} will be applied in the {tool_call['args']['name']} {tool_call['args']['kind']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+        if tool_call["name"] == "createKubernetesResource":
+            return f"The following resource: {tool_call['args']['resource']} will be applied in the {tool_call['args']['namespace']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+
         return ""
     
     async def tool_node(state: AgentState):
@@ -117,12 +121,20 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
                     return {"messages": "the tool execution was cancelled by the user."}
             try:
                 tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
-                json_result = json.loads(tool_result)
-                writer = get_stream_writer()  
-                writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
+                try:
+                    json_result = json.loads(tool_result)
+                    if "uiContext" in json_result:
+                        writer = get_stream_writer()  
+                        await writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
+                    if "llm" in json_result:
+                        result = json_result["llm"]
+                    else:
+                        result = json_result
+                except Exception:
+                    result = tool_result
                 outputs.append(
                     ToolMessage(
-                        content=json_result["llm"],
+                        content=result,
                         name=tool_call["name"],
                         tool_call_id=tool_call["id"])
                 )
@@ -171,23 +183,44 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         messages = state["messages"]
         last_message = messages[-1]
         if not last_message.tool_calls:
+            if len(messages) > 6:
+                return "summarize_conversation"
             return "end"
         else:
             return "continue"
+        
+    def summarize_conversation(state: AgentState):
+        summary = state.get("summary", "")
+        if summary:
+            summary_message = (
+                f"This is summary of the conversation to date: {summary}\n"
+                "Extend the summary by taking into account the new messages above:" )
+        else:
+            summary_message = "Create a summary of the conversation above:"
+
+        messages = state["messages"] + [HumanMessage(content=summary_message)]
+        response = llm_with_tools.invoke(messages)
+        new_messages = [RemoveMessage(id=m.id) for m in messages[:-1]]
+        new_messages = new_messages + [response]
+        
+        return {"summary": response.content, "messages": new_messages}
 
     workflow = StateGraph(AgentState)
 
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
+    workflow.add_node("summarize_conversation", summarize_conversation)
     workflow.set_entry_point("agent")
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {
             "continue": "tools",
+            "summarize_conversation": "summarize_conversation",
             "end": END,
         },
     )
     workflow.add_edge("tools", "agent")
+    workflow.add_edge("summarize_conversation", END)
 
     return workflow

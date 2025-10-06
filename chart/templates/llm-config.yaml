@@ -12,3 +12,6 @@ stringData:
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
   ENABLE_RAG: "{{ .Values.rag.enabled }}"
   EMBEDDINGS_MODEL: "{{ .Values.rag.embeddings_model }}"
+  LANGFUSE_HOST: "{{ .Values.langfuseHost }}"
+  LANGFUSE_PUBLIC_KEY: "{{ .Values.langfusePublicKey }}"
+  LANGFUSE_SECRET_KEY: "{{ .Values.langfuseSecretKey }}"
