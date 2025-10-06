@@ -161,13 +161,12 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         else:
             summary_message = "Create a summary of the conversation above:"
 
-        # Add prompt to our history
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = llm_with_tools.invoke(messages)
+        new_messages = [RemoveMessage(id=m.id) for m in messages[:-1]]
+        new_messages = new_messages + [response]
         
-        # Delete all but the 2 most recent messages
-        delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-2]]
-        return {"summary": response.content, "messages": delete_messages}
+        return {"summary": response.content, "messages": new_messages}
 
     workflow = StateGraph(AgentState)
 
