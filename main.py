@@ -26,7 +26,6 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
-checkpointer = InMemorySaver()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,6 +67,7 @@ async def websocket_endpoint(websocket: WebSocket):
             thread_id = str(uuid.uuid4())
             tools = await load_mcp_tools(session)
             langfuse_handler = CallbackHandler()
+            checkpointer = InMemorySaver()
             agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
             config = {
                 "callbacks": [langfuse_handler],
