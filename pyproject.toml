@@ -12,6 +12,8 @@ dependencies = [
     "langchain-mcp-adapters>=0.1.9",
     "langchain-ollama>=0.3.6",
     "langchain-openai>=0.3.33",
+    "langchain-text-splitters>=0.3.11",
+    "langchain-community>=0.3.30",
     "langfuse>=3.3.4",
     "langgraph>=0.6.4",
     "langgraph-supervisor>=0.0.29",
@@ -19,4 +21,6 @@ dependencies = [
     "mock>=5.2.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
+    "unstructured>=0.18.15",
+    "unstructured[md]>=0.18.15"
 ]

@@ -1,3 +1,4 @@
+import os
 import json
 from typing import (
     Annotated,
@@ -13,6 +14,11 @@ from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
+from langchain.document_loaders import DirectoryLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.embeddings import Embeddings
+
 from langgraph.runtime import Runtime
 from typing_extensions import Literal
 from langgraph.graph import END
@@ -30,6 +36,37 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
+def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
+    """
+    Creates a retriever for Rancher documentation using RAG (Retrieval-Augmented Generation).
+
+    Args:
+        embedding_model: The embedding model to use for creating document embeddings.
+
+    Returns:
+        A VectorStoreRetriever that can be used to fetch relevant documents.
+    """
+    # test if `/rancher_docs` exists and contains files
+    doc_path = os.environ.get("DOCS_PATH", "/rancher_docs")
+    if not os.path.exists(doc_path) or not os.listdir(doc_path):
+        raise FileNotFoundError("The directory /rancher_docs does not exist or is empty.")
+    # load all markdown files in the directory
+    loader = DirectoryLoader(doc_path, glob="**/*.md")
+    docs = loader.load()
+    print(f"→ {len(docs)} raw documents loaded")
+    # 
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,  # chunk size (characters)
+        chunk_overlap=200,  # chunk overlap (characters)
+        add_start_index=True,  # track index in original document
+    )
+    all_splits = text_splitter.split_documents(docs)
+    # Initialize the vector store
+    vector_store = InMemoryVectorStore(embedding_model)  
+    vector_store.add_documents(documents=all_splits)
+    retriever = vector_store.as_retriever(search_kwargs={"k": 6})
+    return retriever
+    
 def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str) -> CompiledStateGraph:
     """
     Creates a LangGraph agent capable of interacting with Kubernetes resources.
@@ -42,7 +79,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-
+    
     llm_with_tools = llm.bind_tools(tools)
 
     def should_interrupt(tool_call: any) -> str:

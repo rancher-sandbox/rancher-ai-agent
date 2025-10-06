@@ -11,10 +11,17 @@ mcp:
 
 imagePullSecrets: [] # Default to an empty list
 
-llmModel:
-ollamaUrl:
+llmModel: ""
+ollamaUrl: ""
 googleApiKey:
 openaiApiKey:
+# Enable RAG with embedded rancher documentation
+rag:
+    enabled: false
+    # Select an embeddings model from https://python.langchain.com/docs/integrations/text_embedding/#all-embedding-models
+    # OpenAI example: "text-embedding-3-large"
+    # Gemini example: "models/gemini-embedding-001"
+    embeddings_model: "qwen3-embedding:0.6b"
 langfuseSecretKey:
 langfusePublicKey:
 langfuseHost:

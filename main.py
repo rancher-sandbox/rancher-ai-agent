@@ -10,7 +10,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama
 from langchain_mcp_adapters.tools import load_mcp_tools
-from agents import create_k8s_agent, Context
+from agents import create_k8s_agent, Context, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse import Langfuse
 from langgraph.store.memory import InMemoryStore
@@ -19,6 +19,13 @@ from langgraph.types import Command
 from langchain_openai import OpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
+from langchain.tools.retriever import create_retriever_tool
+from langchain_core.embeddings import Embeddings
+from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
+
+
 from langfuse.langchain import CallbackHandler
 from datetime import datetime
 
@@ -31,6 +38,15 @@ init_config = {}
 async def lifespan(app: FastAPI):
     try:
         init_config["llm"] = get_llm()
+        logging.info(f"Using model: {init_config['llm']}")
+        # if ENABLE_RAG flag is set, initialize the RAG retriever tool
+        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+            retriever = init_rag_rancher(get_llm_embeddings())
+            init_config["retriever_tool"] = create_retriever_tool(
+                retriever,
+                "retrieve_rancher_docs",
+                "Search and return relevant passages from local Rancher/SUSE documentation.",
+            )
     except ValueError as e:
         logging.critical(e)
         raise e
@@ -66,6 +82,10 @@ async def websocket_endpoint(websocket: WebSocket):
             await session.initialize()
             thread_id = str(uuid.uuid4())
             tools = await load_mcp_tools(session)
+            
+            # if ENABLE_RAG is true, add the retriever tool to the tools list
+            if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+                tools = [init_config["retriever_tool"]] + tools
             langfuse_handler = CallbackHandler()
             checkpointer = InMemorySaver()
             agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
@@ -183,6 +203,38 @@ def get_llm() -> BaseLanguageModel:
     
     raise ValueError("LLM not configured.")
 
+def get_llm_embeddings() -> Embeddings:
+    """
+    Selects and returns an embedding model instance based on environment variables.
+
+    Returns:
+        An instance of a LangChain embedding model that implements the Embeddings interface.
+
+    Raises:
+        ValueError: If a required environment variable (like EMBEDDING_MODEL for Ollama) is missing,
+                    or if no supported embedding provider is configured at all.
+    """
+
+     # Provider 1: Ollama
+    ollama_url = os.environ.get("OLLAMA_URL")
+    embedding_model_name = os.environ.get("EMBEDDINGS_MODEL")
+    if not embedding_model_name:
+            raise ValueError("EMBEDDINGS_MODEL must be set.")
+    if ollama_url:
+        return OllamaEmbeddings(model=embedding_model_name, base_url=ollama_url)
+
+    # Provider 2: Google Gemini
+    gemini_key = os.environ.get("GOOGLE_API_KEY")
+    if gemini_key:
+        return GoogleGenerativeAIEmbeddings(model=embedding_model_name)
+
+    # Provider 3: OpenAI
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+            return OpenAIEmbeddings(model=embedding_model_name)
+
+    raise ValueError("No embedding provider configured. Set OLLAMA_URL, GOOGLE_API_KEY, or OPENAI_API_KEY.")
+
 def get_system_prompt() -> str:
     """
     Retrieves the system prompt for the AI agent.
@@ -204,7 +256,7 @@ def get_system_prompt() -> str:
 ## CORE DIRECTIVES
 
 ### UI-First Mentality
-* NEVER suggest using `kubectl`, `helm`, or any other CLI tool.
+* NEVER suggest using `kubectl`, `helm`, or any other CLI tool UNLESS explicitely provided by the `retrieve_rancher_docs` tool.
 * All actions and information should reflect what the user can see and click on inside the Rancher UI.
 
 ### Context Awareness
@@ -230,6 +282,12 @@ Express certainty levels with clear language and a percentage.
 * If the request is off-topic:
   - "I can't help with that, but I can show you why a pod might be stuck in CrashLoopBackOff. How can I assist with your Rancher environment?"
 
+## Tools usage
+* If the tool fails, explain the failure and suggest manual step to assist the user to answer his original question and not to troubleshoot the tool failure.
+
+## Docs
+* When relevant, always provide links to Rancher or Kubernetes documentation.
+
 ## RESOURCE CREATION & MODIFICATION
 
 * Always generate Kubernetes YAML in a markdown code block.
@@ -243,7 +301,7 @@ The output should always be provided in Markdown format.
 - Always end with exactly three actionable suggestions:
   - Format: SUGGESTIONS: [suggestion1] | [suggestion2] | [suggestion3]
   - No markdown, no numbering, under 60 characters each.
-  - Must be relevant to the current Rancher UI context.
-
+  - The first two suggestions must be directly relevant to the current context. If none fallback to the next rule.
+  - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
 Examples: SUGGESTIONS: How do I scale this deployment? | Check the resource usage for this cluster | Show me the logs for the failing pod
 """
