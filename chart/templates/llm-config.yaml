@@ -10,3 +10,6 @@ stringData:
   MODEL: "{{ .Values.llmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
+  LANGFUSE_HOST: "{{ .Values.langfuseHost }}"
+  LANGFUSE_PUBLIC_KEY: "{{ .Values.langfusePublicKey }}"
+  LANGFUSE_SECRET_KEY: "{{ .Values.langfuseSecretKey }}"

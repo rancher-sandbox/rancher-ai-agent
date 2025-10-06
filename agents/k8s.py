@@ -28,7 +28,6 @@ class Context:
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    messages_history: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
 def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str) -> CompiledStateGraph:
@@ -131,7 +130,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
             messages_to_send.append(context_prompt)
         response = llm_with_tools.invoke(messages_to_send + state["messages"], config)
 
-        return {"messages": [response], "messages_history": [response]}
+        return {"messages": [response]}
 
     # Define the conditional edge that determines whether to continue or not
     def should_continue(state: AgentState):

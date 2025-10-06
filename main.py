@@ -26,9 +26,7 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
-user_threads = {}
 checkpointer = InMemorySaver()
-in_memory_store = InMemoryStore()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,21 +48,8 @@ async def websocket_endpoint(websocket: WebSocket):
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-    #thread_id = websocket.query_params.get("thread_id")
-    #user_id = websocket.query_params.get("user_id")
-    # TODO! currently passing the userId and threadId using the Sec-WebSocket-Protocol header because k8s proxy service won't pass query string parameters https://github.com/kubernetes/kubernetes/issues/77142 
-    protocol = websocket.headers.get('sec-websocket-protocol')
-    user_id = None
-    thread_id = None
-    if protocol:
-        parts = protocol.split('_', 1)
-        if len(parts) == 1:
-            user_id = parts[0]
-        elif len(parts) == 2:
-            user_id, thread_id = parts
-        await websocket.accept(subprotocol=protocol)
-    else:
-        await websocket.accept()
+  
+    await websocket.accept()
     cookies = websocket.cookies
     rancher_url = "https://"+websocket.url.hostname
     if websocket.url.port:
@@ -80,13 +65,10 @@ async def websocket_endpoint(websocket: WebSocket):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
         async with ClientSession(read, write) as session:
             await session.initialize()
-            if not user_id:
-                user_id = "anonymous"
-            if not thread_id:
-                thread_id = str(uuid.uuid4())
+            thread_id = str(uuid.uuid4())
             tools = await load_mcp_tools(session)
             langfuse_handler = CallbackHandler()
-            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer, store=in_memory_store)
+            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
             config = {
                 "callbacks": [langfuse_handler],
                 "thread_id": thread_id
@@ -103,11 +85,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     except json.JSONDecodeError:
                         prompt = request
 
-                    add_prompt_to_history(user_id, thread_id, prompt)
-
                     await stream_agent_response(
                         agent=agent,
-                        input_data={"messages": [{"role": "user", "content": prompt}], "messages_history": prompt},
+                        input_data={"messages": [{"role": "user", "content": prompt}]},
                         config=config,
                         websocket=websocket,
                         context=context)
@@ -126,14 +106,6 @@ async def get(request: Request):
         modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
     return HTMLResponse(modified_html)
-
-@app.get("/history")
-async def get(request: Request):
-    return user_threads
-
-@app.get("/history/{user_id}/{thread_id}")
-async def read_history(user_id: str, thread_id: str):
-    return checkpointer.get(config={"configurable": {"user_id": user_id, "thread_id": thread_id}})
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
@@ -275,14 +247,3 @@ The output should always be provided in Markdown format.
 
 Examples: SUGGESTIONS: How do I scale this deployment? | Check the resource usage for this cluster | Show me the logs for the failing pod
 """
-
-# This is temporary for storing chat history in memory. This will be replaced!
-def add_prompt_to_history(user_id: str, thread_id: str, prompt: str):
-    """Add a prompt to the conversation history."""
-    if user_id not in user_threads:
-        user_threads[user_id] = {}
-    user_threads[user_id][thread_id] = {"timestamp": datetime.now()}
-    if user_id in user_threads:
-        if thread_id in user_threads[user_id]:
-            if "prompt" not in user_threads[user_id][thread_id]:
-                user_threads[user_id][thread_id]["prompt"] = prompt
