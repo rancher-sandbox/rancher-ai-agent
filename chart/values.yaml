@@ -1,7 +1,7 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-agent
-    tag: v0.0.1-alpha.17
+    tag: v0.0.1-alpha.10
     pullPolicy: IfNotPresent
 mcp:
   image:
@@ -15,3 +15,6 @@ llmModel:
 ollamaUrl:
 googleApiKey:
 openaiApiKey:
+langfuseSecretKey:
+langfusePublicKey:
+langfuseHost:
