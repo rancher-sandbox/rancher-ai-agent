@@ -71,14 +71,14 @@ async def websocket_endpoint(websocket: WebSocket):
         rancher_url += ":"+str(websocket.url.port)
 
     async with streamablehttp_client(
-        url="http://rancher-mcp-server",
+        url="http://localhost:9092",
         headers={
-             "R_token":str(cookies.get("R_SESS")),
-             "R_url":rancher_url
+             "R_token":"token-bhz9x:bl2dbwhj5tv5plv2mppngnzkqcs9dsfrrrqvjjp8tvbpmwzmbq4nxm",
+             "R_url":"https://raul-cabello.ngrok.app"
              }
     ) as (read, write, _):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
-        async with ClientSession(read, write) as session:
+        async with ClientSession(read, write) as session: #TODO handle error 
             await session.initialize()
             thread_id = str(uuid.uuid4())
             tools = await load_mcp_tools(session)
@@ -123,7 +123,7 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-        modified_html = html_content.replace("{{ url }}", request.url.hostname)
+        modified_html = html_content.replace("{{ url }}", "localhost:8000")
 
     return HTMLResponse(modified_html)
 
@@ -301,6 +301,7 @@ The output should always be provided in Markdown format.
 - Always end with exactly three actionable suggestions:
   - Format: SUGGESTIONS: [suggestion1] | [suggestion2] | [suggestion3]
   - No markdown, no numbering, under 60 characters each.
+  - If a tool returns a suggestion, always present it as the first suggestion.
   - The first two suggestions must be directly relevant to the current context. If none fallback to the next rule.
   - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
 Examples: SUGGESTIONS: How do I scale this deployment? | Check the resource usage for this cluster | Show me the logs for the failing pod
