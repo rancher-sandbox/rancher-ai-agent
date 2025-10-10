@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import uuid
 from typing import (
     Annotated,
     Sequence,
@@ -7,7 +9,7 @@ from typing import (
 )
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_stream_writer
 from langchain_core.tools import BaseTool, ToolException
@@ -25,6 +27,7 @@ from langgraph.graph import END
 import langgraph.types 
 from dataclasses import dataclass
 from typing import Dict
+from langchain_community.vectorstores import Chroma
 
 @dataclass
 class Context:
@@ -81,6 +84,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     """
     
     llm_with_tools = llm.bind_tools(tools)
+    tools_by_name = {tool.name: tool for tool in tools}
 
     def should_interrupt(tool_call: any) -> str:
         """
@@ -96,10 +100,52 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
 
         if tool_call["name"] == "patchKubernetesResource":
             return f"The following patch: {tool_call['args']['patch']} will be applied in the {tool_call['args']['name']} {tool_call['args']['kind']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
-        if tool_call["name"] == "createKubernetesResource":
-            return f"The following resource: {tool_call['args']['resource']} will be applied in the {tool_call['args']['namespace']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+        if tool_call["name"] == "createKubernetesResources":
+            resources = ""
+            for res in tool_call['args']['resources']:
+                resources += f"{res['resource']} will be applied in the {res['namespace']} within the {res['cluster']} cluster \n"
+            return f"The following resources will be created: {resources}. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
 
         return ""
+    
+    async def call_tool(tool_call:any):
+        if interrupt_message := should_interrupt(tool_call):
+            response_message = langgraph.types.interrupt(interrupt_message) 
+            try:
+                json_response = json.loads(response_message["response"])
+                response = json_response["prompt"]
+            except Exception:
+                response = response_message["response"]
+            if response != "yes":
+                return {"messages": "the tool execution was cancelled by the user."}
+            
+        tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+
+        try:
+            json_result = json.loads(tool_result)
+            if "toolCallsRequest" in json_result:
+                return ToolMessage(
+                        content="",
+                        tool_calls=[json_result["toolCallsRequest"]],
+                        additional_text=json_result["additionalText"],
+                        confirm_tex=json_result["confirmText"],
+                        nested_tool_call=True,
+                        tool_call_id=uuid.uuid4()) 
+
+            if "uiContext" in json_result:
+                writer = get_stream_writer()
+                writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
+            if "llm" in json_result:
+                result = json_result["llm"]
+            else:
+                result = json_result
+        except Exception as e:
+            result = tool_result
+    
+        return ToolMessage(
+            content=result,
+            name=tool_call["name"],
+            tool_call_id=tool_call["id"])
     
     async def tool_node(state: AgentState):
         """
@@ -112,34 +158,14 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
             A dictionary to update the state with the results of the tool calls.
         """
 
-        tools_by_name = {tool.name: tool for tool in tools}
         outputs = []
-        for tool_call in state["messages"][-1].tool_calls:
-            if interrupt_message := should_interrupt(tool_call):
-                response = langgraph.types.interrupt(interrupt_message) 
-                if response["response"] != "yes":
-                    return {"messages": "the tool execution was cancelled by the user."}
-            try:
-                tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
-                try:
-                    json_result = json.loads(tool_result)
-                    if "uiContext" in json_result:
-                        writer = get_stream_writer()  
-                        await writer(f"<mcp-response>{json_result['uiContext']}</mcp-response>") 
-                    if "llm" in json_result:
-                        result = json_result["llm"]
-                    else:
-                        result = json_result
-                except Exception:
-                    result = tool_result
-                outputs.append(
-                    ToolMessage(
-                        content=result,
-                        name=tool_call["name"],
-                        tool_call_id=tool_call["id"])
-                )
-            except ToolException as e:
-                return {"messages": str(e)}
+        last_message = state["messages"][-1]
+        try:
+            for tool_call in last_message.tool_calls:
+                outputs.append(await call_tool(tool_call))
+        except ToolException as e: 
+            return {"messages": str(e)}
+        
         return {"messages": outputs}
 
     def call_model(
@@ -168,6 +194,26 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         response = llm_with_tools.invoke(messages_to_send + state["messages"], config)
 
         return {"messages": [response]}
+    
+    async def nested_tool(state: AgentState):
+        outputs = []
+        writer = get_stream_writer()
+        last_message = state["messages"][-1]
+        additional_text = getattr(last_message, 'additional_text', None)
+        if additional_text:
+            writer(f"{last_message.additional_text}")
+
+        try:
+            for tool_call in last_message.tool_calls:
+                outputs.append(await call_tool(tool_call))
+        except ToolException as e: 
+            writer(f"An error occurred: {str(e)} ") 
+            return {"messages": str(e)}
+        
+        writer("Permissions granted!") 
+
+        return {"messages": outputs}
+
 
     # Define the conditional edge that determines whether to continue or not
     def should_continue(state: AgentState):
@@ -189,24 +235,33 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         else:
             return "continue"
         
+    def is_nested_tool_call(state: AgentState):
+        messages = state["messages"]
+        last_message = messages[-1]
+        if getattr(last_message, "nested_tool_call", False):
+            return "nested_tool"
+        else:
+            return "agent"
+        
     def summarize_conversation(state: AgentState):
         summary = state.get("summary", "")
         if summary:
             summary_message = (
-                f"This is summary of the conversation to date: {summary}\n"
+                f"//no_think This is summary of the conversation to date: {summary}\n"
                 "Extend the summary by taking into account the new messages above:" )
         else:
-            summary_message = "Create a summary of the conversation above:"
+            summary_message = "//no_think Create a summary of the conversation above:"
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = llm_with_tools.invoke(messages)
         new_messages = [RemoveMessage(id=m.id) for m in messages[:-1]]
         new_messages = new_messages + [response]
-        
+
         return {"summary": response.content, "messages": new_messages}
 
     workflow = StateGraph(AgentState)
 
+    workflow.add_node("nested_tool", nested_tool)
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
     workflow.add_node("summarize_conversation", summarize_conversation)
@@ -220,7 +275,15 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
             "end": END,
         },
     )
-    workflow.add_edge("tools", "agent")
+    workflow.add_conditional_edges(
+        "tools",
+        is_nested_tool_call,
+        {
+            "agent": "agent",
+            "nested_tool": "nested_tool"
+        },
+    ) 
     workflow.add_edge("summarize_conversation", END)
+    workflow.add_edge("nested_tool", "summarize_conversation") 
 
     return workflow
