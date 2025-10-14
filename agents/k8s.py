@@ -116,8 +116,13 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         outputs = []
         for tool_call in state["messages"][-1].tool_calls:
             if interrupt_message := should_interrupt(tool_call):
-                response = langgraph.types.interrupt(interrupt_message) 
-                if response["response"] != "yes":
+                response_message = langgraph.types.interrupt(interrupt_message) 
+                try:
+                    json_response = json.loads(response_message["response"])
+                    response = json_response["prompt"]
+                except Exception:
+                    response = response_message["response"]
+                if response != "yes":
                     return {"messages": "the tool execution was cancelled by the user."}
             try:
                 tool_result = await tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
