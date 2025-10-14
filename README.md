@@ -49,10 +49,47 @@ The **UI Extension** provides the user-facing chat interface within the Rancher 
 5. **Response → User**  
    The answer is returned to the user through the UI Extension.  
 
-## Installation
 
-- **No Helm chart package is currently available.** You'll need to clone the repository and use the `chart` directory to install the application.
-- **Configure your LLM provider.** You must set one of the following in `values.yaml`: `ollamaUrl`, `googleApiKey`, or `openaiApiKey`. The `llmModel` variable must also be specified.
-- **Run the Helm command:** Execute `helm install ai-agent chart --namespace cattle-ai-agent-system --create-namespace`. The application must be installed in the `cattle-ai-agent-system` namespace.
-- The temporary UI is available at https://yourRancherURl/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent. This will change once the UI extension is available.
+## Installation Steps
+
+1. Add the Helm Repository
+First, add the Rancher AI Agent Helm repository to your cluster.
+
+```bash
+helm repo add rancher-ai https://rancher-sandbox.github.io/rancher-ai-agent
+```
+
+2. Update Your Helm Repositories
+Fetch the latest list of charts from all your configured repositories.
+
+```bash
+helm repo update
+```
+
+3. Install the Chart
+Install the agent chart into a new namespace using the values.yaml file you created.
+
+```bash
+helm install rancher-ai-agent rancher-ai/agent \
+  --namespace cattle-ai-agent-system \
+  --create-namespace \
+  --devel \
+  -f values.yaml
+--create-namespace
+```
+
+--devel: Includes pre-release versions of the chart, which is currently required.
+
+-f values.yaml: Applies your custom LLM configuration.
+
+## Accessing the UI
+Once the agent is installed, you can use the UI extension or use the temporary UI through the Rancher API proxy.
+
+Note: This is a temporary endpoint for development and will be replaced by a UI extension in the future.
+
+Construct the URL by replacing yourRancherURL with your Rancher server's address:
+
+https://<yourRancherURL>/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent
+
+
 
