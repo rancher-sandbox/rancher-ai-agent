@@ -7,6 +7,9 @@
 FROM alpine:latest AS docs-builder
 
 ARG DOCS_URL=https://github.com/rancher/rancher-docs/archive/refs/tags/initial-snapshot-v2.12.2.tar.gz
+# Add a build argument to control which docs are copied. Defaults to 'false'.
+ARG COPY_ALL_DOCS=false
+
 LABEL stage="docs-builder"
 WORKDIR /tmp/src
 
@@ -14,9 +17,14 @@ RUN apk add --no-cache wget && \
     wget -O rancher-docs.tar.gz ${DOCS_URL} && \
     tar -xvzf rancher-docs.tar.gz --strip-components=1
 
+# Use a single RUN command with a shell 'if' statement
 RUN mkdir /rancher_docs && \
-    mv /tmp/src/docs/troubleshooting /rancher_docs/ && \
-    mv /tmp/src/docs/reference-guides /rancher_docs/
+    if [ "${COPY_ALL_DOCS}" = "true" ]; then \
+        mv /tmp/src/docs/* /rancher_docs/; \
+    else \
+        mv /tmp/src/docs/troubleshooting /rancher_docs/ && \
+        mv /tmp/src/docs/reference-guides /rancher_docs/; \
+    fi
 
 #TODO - add more documentation as needed
 #TODO - add RAG data cleanup
