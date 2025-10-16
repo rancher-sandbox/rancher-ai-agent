@@ -15,12 +15,11 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
-from langchain.document_loaders import DirectoryLoader
+from langchain_community.document_loaders import DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.embeddings import Embeddings
 
 from langgraph.runtime import Runtime
-from typing_extensions import Literal
 from langgraph.graph import END
 import langgraph.types 
 from dataclasses import dataclass
@@ -95,9 +94,9 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
         """
 
         if tool_call["name"] == "patchKubernetesResource":
-            return f"The following patch: {tool_call['args']['patch']} will be applied in the {tool_call['args']['name']} {tool_call['args']['kind']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+            return create_confirmation_response(tool_call['args']['patch'], "patch", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
         if tool_call["name"] == "createKubernetesResource":
-            return f"The following resource: {tool_call['args']['resource']} will be applied in the {tool_call['args']['namespace']} within the {tool_call['args']['cluster']} cluster. WARNING: This action will modify cluster resources. Do you want to proceed? (yes/no)"
+            return create_confirmation_response(tool_call['args']['resource'], "patch", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
 
         return ""
     
@@ -229,3 +228,19 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     workflow.add_edge("summarize_conversation", END)
 
     return workflow
+
+def create_confirmation_response(payload: str, type: str, name: str, kind: str, cluster: str, namespace: str):
+    payload_data = {
+        "payload": payload,
+        "type": type,
+        "resource": {
+            "name": name,
+            "kind": kind,
+            "cluster": cluster,
+            "namespace": namespace
+        }
+    }
+
+    json_payload = json.dumps(payload_data)
+
+    return f'<confirmation-response>{json_payload}</confirmation-response>'
