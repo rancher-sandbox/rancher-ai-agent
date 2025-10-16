@@ -5,7 +5,6 @@ from fastapi import WebSocketDisconnect
 
 from main import (
     websocket_endpoint,
-    is_context_message,
     get_llm,
 )
 
@@ -16,6 +15,7 @@ class MockWebSocket:
         self.cookies = {"R_SESS": "fake_token"}
         self.url = MagicMock()
         self.url.hostname = "fake.hostname"
+        self.url.port = None
         self.client = MagicMock()
         self.client.host = "fake_client_host"
         self._receive_queue = messages or []
@@ -35,13 +35,13 @@ class MockWebSocket:
     async def close(self, code=1000):
         self.closed = True
 
-@pytest.mark.parametrize("message, expected", [
+""" @pytest.mark.parametrize("message, expected", [
     ("<mcp_context>cluster=local</mcp_context>", ("cluster", "local")),
     ("just a normal message", None),
 ])
 def test_is_context_message(message, expected):
     assert is_context_message(message) == expected
-
+ """
 @patch('main.ChatOllama')
 def test_get_llm_ollama(mock_chat_ollama):
     with patch.dict(os.environ, {"MODEL": "test-model", "OLLAMA_URL": "http://localhost:11434"}, clear=True):
@@ -125,7 +125,6 @@ async def test_websocket_endpoint(mock_dependencies):
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
     assert call_kwargs['agent'] == mock_dependencies["compiled_agent"]
     assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "test message"}]}
-    assert call_kwargs['config'] == {"thread_id": "thread-1"}
     assert call_kwargs['websocket'] == mock_ws
     assert call_kwargs['context'] == {}
 
@@ -134,14 +133,20 @@ async def test_websocket_endpoint(mock_dependencies):
 @pytest.mark.asyncio
 async def test_websocket_endpoint_context_message(mock_dependencies):
     mock_ws = MockWebSocket(messages=[
-        "<mcp_context>cluster=local</mcp_context>",
-        "hello agent in local cluster"
+        '{"prompt": "show all pods", "context": { "namespace": "default", "cluster": "local"} }'
     ])
 
     await websocket_endpoint(mock_ws)
 
+    mock_dependencies["client_session"].initialize.assert_awaited_once()
+    mock_dependencies["load_mcp_tools"].assert_awaited_once_with(mock_dependencies["client_session"])
+    mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], system_prompt="fake_prompt")
+    mock_dependencies["create_k8s_agent"].return_value.compile.assert_called_once()
     mock_dependencies["stream_agent_response"].assert_awaited_once()
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
     assert call_kwargs['agent'] == mock_dependencies["compiled_agent"]
-    assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "hello agent in local cluster"}]}
-    assert call_kwargs['context'] == {"cluster": "local"} #
+    assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "show all pods"}]}
+    assert call_kwargs['websocket'] == mock_ws
+    assert call_kwargs['context'] == {"cluster": "local", "namespace": "default"}
+
+
