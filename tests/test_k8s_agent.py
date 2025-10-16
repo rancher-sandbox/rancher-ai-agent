@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from agents import create_k8s_agent
+from agents.k8s import K8sAgentBuilder
 
 class FakeMessage:
     def __init__(self, tool_calls=None):
@@ -26,67 +26,65 @@ fake_patch_tool_execution_message = "fake k8s resource patched"
 def mock_tools():
     return [MockTool("getKubernetesResource", fake_get_tool_execution_message), MockTool("patchKubernetesResource", fake_patch_tool_execution_message)]
 
-def test_bind_tools(mock_llm, mock_tools):
-    workflow = create_k8s_agent(
+@pytest.fixture
+def mock_checkpointer():
+    return MagicMock()
+
+def test_builder_initialization_binds_tools(mock_llm, mock_tools, mock_checkpointer):
+    """Tests that the K8sAgentBuilder correctly initializes and binds tools to the LLM."""
+    builder = K8sAgentBuilder(
         llm=mock_llm,
         tools=mock_tools,
-        system_prompt="system_prompt"
+        system_prompt="system_prompt",
+        checkpointer=mock_checkpointer
     )
 
-    assert workflow is not None
+    assert builder is not None
     mock_llm.bind_tools.assert_called_once_with(mock_tools)
 
 @pytest.mark.asyncio
-@patch("langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
-async def test_tool_node_executes_tool_human_verification_cancelled(mock_llm, mock_tools):
-    workflow = create_k8s_agent(
-        llm=mock_llm,
-        tools=mock_tools,
-        system_prompt="system_prompt"
-    )
-    tool_node = workflow.nodes["tools"].runnable
+@patch("agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
+async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock_checkpointer):
+    """Tests that tool execution is cancelled if the user responds 'no' to the confirmation prompt."""
+    builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
     tool_call = {
         "id": "123",
         "name": "patchKubernetesResource",
         "args": {"namespace": "cattle-system", "name": "rancher", "kind": "Deployment", "cluster": "local", "patch": "[]"}
     }
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
-
-    result = await tool_node.ainvoke(state)
+    result = await builder.tool_node(state)
 
     assert result["messages"] == "the tool execution was cancelled by the user."
 
 @pytest.mark.asyncio
-@patch("langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
-async def test_tool_node_executes_tool_human_verification_approved(mock_llm, mock_tools):
-    workflow = create_k8s_agent(
-        llm=mock_llm,
-        tools=mock_tools,
-        system_prompt="system_prompt"
-    )
-    tool_node = workflow.nodes["tools"].runnable
+@patch("agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
+async def test_tool_node_human_verification_approved(mock_llm, mock_tools, mock_checkpointer):
+    """Tests that tool execution proceeds if the user responds 'yes' to the confirmation prompt."""
+    builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
     tool_call = {
         "id": "123",
         "name": "patchKubernetesResource",
         "args": {"namespace": "cattle-system", "name": "rancher", "kind": "Deployment", "cluster": "local", "patch": "[]"}
     }
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
-
-    result = await tool_node.ainvoke(state)
+    result = await builder.tool_node(state)
 
     assert isinstance(result["messages"], list)
+    assert len(result["messages"]) == 1
     assert result["messages"][0].name == "patchKubernetesResource"
     assert result["messages"][0].tool_call_id == "123"
     assert result["messages"][0].content == fake_patch_tool_execution_message
 
 @pytest.mark.asyncio
-async def test_tool_node_executes_tool(mock_llm, mock_tools):
-    workflow = create_k8s_agent(
+async def test_tool_node_executes_tool_without_confirmation(mock_llm, mock_tools, mock_checkpointer):
+    """Tests that a tool not requiring confirmation is executed directly."""
+    builder = K8sAgentBuilder(
         llm=mock_llm,
         tools=mock_tools,
-        system_prompt="system_prompt"
+        system_prompt="system_prompt",
+        checkpointer=mock_checkpointer
     )
-    tool_node = workflow.nodes["tools"].runnable
     tool_call = {
         "id": "123",
         "name": "getKubernetesResource",
@@ -94,26 +92,28 @@ async def test_tool_node_executes_tool(mock_llm, mock_tools):
     }
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
 
-    result = await tool_node.ainvoke(state)
+    result = await builder.tool_node(state)
 
     assert isinstance(result["messages"], list)
+    assert len(result["messages"]) == 1
     assert result["messages"][0].name == "getKubernetesResource"
     assert result["messages"][0].tool_call_id == "123"
     assert result["messages"][0].content == fake_get_tool_execution_message
 
-def test_call_model_includes_system_prompt(mock_llm, mock_tools):
-    workflow = create_k8s_agent(
+def test_call_model_node_includes_system_prompt(mock_llm, mock_tools, mock_checkpointer):
+    """Tests that the system prompt is included in the messages sent to the LLM."""
+    builder = K8sAgentBuilder(
         llm=mock_llm,
-        tools=[mock_tools],
-        system_prompt="system_prompt"
+        tools=mock_tools,
+        system_prompt="system_prompt",
+        checkpointer=mock_checkpointer
     )
-    call_model = workflow.nodes["agent"].runnable
     fake_message = FakeMessage()
     state = {"messages": [fake_message]}
     config = MagicMock()
 
-    result = call_model.invoke(state, config)
+    result = builder.call_model_node(state, config, MagicMock(context=MagicMock(context={})))
 
-    assert "llm_response" in result["messages"]
+    assert result["messages"][0] == "llm_response"
     mock_llm.invoke.assert_called_once_with(["system_prompt", fake_message], config)
  
