@@ -2,13 +2,14 @@ import logging
 import os
 import json
 import uuid
+import httpx
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
-from langchain_ollama import ChatOllama
+from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
 from agents import create_k8s_agent, Context, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -24,12 +25,8 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
-
-
 from langfuse.langchain import CallbackHandler
-from datetime import datetime
 
-# Configure logging to show INFO level messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
@@ -63,7 +60,6 @@ async def websocket_endpoint(websocket: WebSocket):
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-  
     await websocket.accept()
     cookies = websocket.cookies
     rancher_url = "https://"+websocket.url.hostname
@@ -87,8 +83,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if os.environ.get("ENABLE_RAG", "false").lower() == "true":
                 tools = [init_config["retriever_tool"]] + tools
             langfuse_handler = CallbackHandler()
-            checkpointer = InMemorySaver()
-            agent = create_k8s_agent(init_config["llm"], tools, system_prompt=get_system_prompt()).compile(checkpointer=checkpointer)
+
+            agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
+            
             config = {
                 "callbacks": [langfuse_handler],
                 "thread_id": thread_id

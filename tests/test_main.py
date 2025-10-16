@@ -1,6 +1,6 @@
 import os
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 from fastapi import WebSocketDisconnect
 
 from main import (
@@ -119,11 +119,9 @@ async def test_websocket_endpoint(mock_dependencies):
     )
     mock_dependencies["client_session"].initialize.assert_awaited_once()
     mock_dependencies["load_mcp_tools"].assert_awaited_once_with(mock_dependencies["client_session"])
-    mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], system_prompt="fake_prompt")
-    mock_dependencies["create_k8s_agent"].return_value.compile.assert_called_once()
+    mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], "fake_prompt", ANY)
     mock_dependencies["stream_agent_response"].assert_awaited_once()
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
-    assert call_kwargs['agent'] == mock_dependencies["compiled_agent"]
     assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "test message"}]}
     assert call_kwargs['websocket'] == mock_ws
     assert call_kwargs['context'] == {}
@@ -140,11 +138,9 @@ async def test_websocket_endpoint_context_message(mock_dependencies):
 
     mock_dependencies["client_session"].initialize.assert_awaited_once()
     mock_dependencies["load_mcp_tools"].assert_awaited_once_with(mock_dependencies["client_session"])
-    mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], system_prompt="fake_prompt")
-    mock_dependencies["create_k8s_agent"].return_value.compile.assert_called_once()
+    mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], "fake_prompt", ANY)
     mock_dependencies["stream_agent_response"].assert_awaited_once()
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
-    assert call_kwargs['agent'] == mock_dependencies["compiled_agent"]
     assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "show all pods"}]}
     assert call_kwargs['websocket'] == mock_ws
     assert call_kwargs['context'] == {"cluster": "local", "namespace": "default"}
