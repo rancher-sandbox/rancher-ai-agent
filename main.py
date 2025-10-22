@@ -2,7 +2,6 @@ import logging
 import os
 import json
 import uuid
-import httpx
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
@@ -13,14 +12,12 @@ from langchain_ollama import ChatOllama
 from langchain_mcp_adapters.tools import load_mcp_tools
 from agents import create_k8s_agent, Context, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langfuse import Langfuse
-from langgraph.store.memory import InMemoryStore
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from langchain_openai import OpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
-from langchain.tools.retriever import create_retriever_tool
+from langchain_core.tools import create_retriever_tool
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -111,6 +108,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except WebSocketDisconnect:
                 logging.info(f"Client {websocket.client.host} disconnected.")
             except Exception as e:
+                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}<error>')
                 logging.error(f"An error occurred: {e}")
                 await websocket.close()
 
@@ -296,9 +294,9 @@ The output should always be provided in Markdown format.
 
 - Be concise: No unnecessary conversational fluff.  
 - Always end with exactly three actionable suggestions:
-  - Format: SUGGESTIONS: [suggestion1] | [suggestion2] | [suggestion3]
+  - Format: <suggestions>["suggestion1","suggestion2","suggestion3"]</suggestions>
   - No markdown, no numbering, under 60 characters each.
   - The first two suggestions must be directly relevant to the current context. If none fallback to the next rule.
   - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
-Examples: SUGGESTIONS: How do I scale this deployment? | Check the resource usage for this cluster | Show me the logs for the failing pod
+Examples: <suggestions>["How do I scale this deployment?","Check the resource usage for this cluster","Show me the logs for the failing pod"]</suggestions>
 """

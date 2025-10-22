@@ -28,21 +28,17 @@
                 document.getElementById('messages').appendChild(li);
             };
 
-            // Listen for messages from the server
-            ws.onmessage = function(event) {
-                console.log("msg received.");
-                const messages = document.getElementById('messages');
-                const message = document.createElement('li');
-                const messageText = document.createTextNode(event.data);
-                message.appendChild(messageText);
-                messages.appendChild(message);
-            };            
             let currentMessageLi;
 
             ws.onmessage = function(event) {
                 console.log("msg received."+ event.data);
                 const messages = document.getElementById('messages');
                 const data = event.data;
+
+                if (data.startsWith("<error>")) {
+                    alert(data.substring(7)); // Show alert without the <error> tag
+                    return;
+                }
 
                 if (data === "<message>") {
                     currentMessageLi = document.createElement('li');
