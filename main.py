@@ -84,10 +84,9 @@ async def websocket_endpoint(websocket: WebSocket):
             agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
             
             config = {
-                "thread_id": thread_id
+                "thread_id": thread_id,
             }
-            langfuse_client = get_client()
-            if langfuse_client.auth_check():
+            if "LANGFUSE_SECRET_KEY" in os.environ and "LANGFUSE_API_KEY" in os.environ and "LANGFUSE_HOST" in os.environ:
                 langfuse_handler = CallbackHandler()
                 config["callbacks"] = [langfuse_handler]
 
