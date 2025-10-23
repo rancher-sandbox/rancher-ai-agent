@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
             init_config["retriever_tool"] = create_retriever_tool(
                 retriever,
                 "retrieve_rancher_docs",
-                "Search and return relevant passages from local Rancher/SUSE documentation.",
+                "Search and return relevant passages from local Rancher/SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.",
             )
     except ValueError as e:
         logging.critical(e)
@@ -284,7 +284,6 @@ Express certainty levels with clear language and a percentage.
 
 ## Tools usage
 * If the tool fails, explain the failure and suggest manual step to assist the user to answer his original question and not to troubleshoot the tool failure.
-* Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.
 
 ## Docs
 * When relevant, always provide links to Rancher or Kubernetes documentation.
