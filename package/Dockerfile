@@ -29,14 +29,16 @@ RUN mkdir /rancher_docs && \
 # =================================================================
 FROM registry.suse.com/bci/python:3.12
 
-# Set the working directory for the application
 WORKDIR /app
-
-COPY . .
 
 RUN pip install uv
 
+COPY pyproject.toml .
+
+RUN uv pip install --system -r pyproject.toml
+
+COPY . .
+
 COPY --from=docs-builder /rancher_docs /rancher_docs
 
-# Specify the default command to run when the container starts
-CMD ["uv", "run", "fastapi", "run"]
+CMD ["fastapi", "run"]
