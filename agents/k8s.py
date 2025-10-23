@@ -20,11 +20,6 @@ from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetrieve
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-@dataclass
-class Context:
-    """Hold the context of what the user is seeing (e.g cluster, namespace, ...)."""
-    context: Dict[str, str]
-
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -71,12 +66,12 @@ class K8sAgentBuilder:
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = self.llm_with_tools.invoke(messages)
-        new_messages = [RemoveMessage(id=m.id) for m in messages[:-1]]
+        new_messages = [RemoveMessage(id=m.id) for m in messages[:-3]]
         new_messages = new_messages + [response]
         
         return {"summary": response.content, "messages": new_messages}
 
-    def call_model_node(self, state: AgentState, config: RunnableConfig, runtime: Runtime[Context]):
+    def call_model_node(self, state: AgentState, config: RunnableConfig):
         """
         Invokes the language model with the current state and context.
 
@@ -91,14 +86,8 @@ class K8sAgentBuilder:
 
         Returns:
             A dictionary containing the LLM's response message."""
-        messages_to_send = [self.system_prompt]
-        if len(runtime.context.context.items()) > 0:
-            context_prompt = "Prioritize the following default values for tool parameters. You must use these exact values unless the user explicitly provides a different value for a specific parameter in their request: "
-            for key, value in runtime.context.context.items():
-                context_prompt += f"key={key}, value={value}\n"
-            messages_to_send.append(context_prompt)
 
-        response = self.llm_with_tools.invoke(messages_to_send + state["messages"], config)
+        response = self.llm_with_tools.invoke([self.system_prompt] + state["messages"], config)
 
         return {"messages": [response]}
 
@@ -152,7 +141,7 @@ class K8sAgentBuilder:
         messages = state["messages"]
         last_message = messages[-1]
         if not last_message.tool_calls:
-            if len(messages) > 6:
+            if len(messages) > 8:
                 return "summarize_conversation"
             return "end"
         else:
@@ -279,7 +268,7 @@ def _should_interrupt(tool_call: any) -> str:
     if tool_call["name"] == "patchKubernetesResource":
         return _create_confirmation_response(tool_call['args']['patch'], "patch", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
     if tool_call["name"] == "createKubernetesResource":
-        return _create_confirmation_response(tool_call['args']['resource'], "patch", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
+        return _create_confirmation_response(tool_call['args']['resource'], "create", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
     return ""
 
 def _extract_interrupt_message(interrupt_message:any) -> str: 
@@ -304,8 +293,9 @@ def _handle_interrupt(tool_call: dict) -> bool:
           
     return True 
 
-def _process_tool_result(tool_result: str) -> any:
-    """Processes the raw tool result, handling JSON and streaming UI context if necessary."""
+def _process_tool_result(tool_result: str) -> str:
+    """Processes the raw tool result, handling JSON and streaming UI context if necessary.
+       MCP returns examaple: {"uiContext":{}, "llm": {}}"""
     try:
         json_result = json.loads(tool_result)
         if "uiContext" in json_result:
@@ -314,7 +304,23 @@ def _process_tool_result(tool_result: str) -> any:
                 writer(f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
         
         # Return the value for the LLM, or the full object if 'llm' key is not present
-        return json_result.get("llm", json_result)
+        return _convert_to_string_if_needed(json_result.get("llm", json_result))
     except json.JSONDecodeError:
         # If it's not a valid JSON, return the raw string result
         return tool_result
+
+def _convert_to_string_if_needed(var):
+    """
+    Converts a variable to a JSON formatted string only if it is a dict or list
+    
+    Args:
+        var: The variable to process.
+        
+    Returns:
+        The JSON string representation if it was a dict/list,
+        otherwise the original variable.
+    """
+    if isinstance(var, (dict, list)):
+        return json.dumps(var)
+    else:
+        return var

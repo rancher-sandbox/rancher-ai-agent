@@ -10,7 +10,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from agents import create_k8s_agent, Context, init_rag_rancher
+from agents import create_k8s_agent, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
@@ -23,6 +23,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langfuse.langchain import CallbackHandler
+from langfuse import get_client
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -79,14 +80,16 @@ async def websocket_endpoint(websocket: WebSocket):
             # if ENABLE_RAG is true, add the retriever tool to the tools list
             if os.environ.get("ENABLE_RAG", "false").lower() == "true":
                 tools = [init_config["retriever_tool"]] + tools
-            langfuse_handler = CallbackHandler()
 
             agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
             
             config = {
-                "callbacks": [langfuse_handler],
                 "thread_id": thread_id
             }
+            langfuse_client = get_client()
+            if langfuse_client.auth_check():
+                langfuse_handler = CallbackHandler()
+                config["callbacks"] = [langfuse_handler]
 
             try:
                 while True:
@@ -98,6 +101,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         prompt = json_request["prompt"]
                     except json.JSONDecodeError:
                         prompt = request
+
+                    if len(context) > 0:
+                        context_prompt = ". Use the following parameters *only* when calling an appropriate tool. Parameters are separated with ';'."
+                        for key, value in context.items():
+                            context_prompt += f"{key}:{value};"
+                        prompt += context_prompt
 
                     await stream_agent_response(
                         agent=agent,
@@ -146,8 +155,7 @@ async def stream_agent_response(
         async for event, data in agent.astream(
             input_data,
             config=config,
-            stream_mode=["updates", "messages", "custom"],
-            context=Context(context=context)
+            stream_mode=["updates", "messages", "custom"]
         ):
             if event == "messages":
                 chunk, metadata = data
