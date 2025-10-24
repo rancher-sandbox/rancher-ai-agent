@@ -25,3 +25,7 @@ spec:
         name: agent
         ports:
          - containerPort: 8000
+        env:
+          - name: INSECURE_SKIP_TLS
+            value: "{{ .Values.insecureSkipTls }}"
+
