@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
             init_config["retriever_tool"] = create_retriever_tool(
                 retriever,
                 "retrieve_rancher_docs",
-                "Search and return relevant passages from local Rancher/SUSE documentation.",
+                "Search and return relevant passages from local Rancher/SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.",
             )
     except ValueError as e:
         logging.critical(e)
