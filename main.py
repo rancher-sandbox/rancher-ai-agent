@@ -301,9 +301,9 @@ The output should always be provided in Markdown format.
 
 - Be concise: No unnecessary conversational fluff.  
 - Always end with exactly three actionable suggestions:
-  - Format: <suggestions>["suggestion1","suggestion2","suggestion3"]</suggestions>
+  - Format: <suggestions>["suggestion1","suggestion2","suggestion3"]</suggestions>. Make sure the content inside the suggestion tag is a valid JSON. Escape special string characters if needed.
   - No markdown, no numbering, under 60 characters each.
   - The first two suggestions must be directly relevant to the current context. If none fallback to the next rule.
   - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
-Examples: <suggestions>["How do I scale this deployment?","Check the resource usage for this cluster","Show me the logs for the failing pod"]</suggestions>
+Examples: <suggestions>["How do I scale the \"rancher\" deployment?","Check the resource usage for this cluster","Show me the logs for the failing pod"]</suggestions>
 """

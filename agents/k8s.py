@@ -141,7 +141,7 @@ class K8sAgentBuilder:
         messages = state["messages"]
         last_message = messages[-1]
         if not last_message.tool_calls:
-            if len(messages) > 8:
+            if len(messages) > 7:
                 return "summarize_conversation"
             return "end"
         else:
