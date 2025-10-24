@@ -47,9 +47,45 @@ The **UI Extension** provides the user-facing chat interface within the Rancher 
 4. **LLM Response Formulation**  
    The LLM takes the tool outputs and crafts a coherent, human-readable response.  
 5. **Response → User**  
-   The answer is returned to the user through the UI Extension.  
+   The answer is returned to the user through the UI Extension.
 
-
+```mermaid
+graph TD
+    subgraph "A. User Interaction"
+        User[User / Analyst / DevOps]
+    end
+    subgraph "B. Rancher AI Assistant (Processing)"
+        Agent(Agent)
+        LLM(LLM local or online)
+        MCPServer(MCP Server)
+    end
+    subgraph "C. Infrastructure"
+        Kubernetes(Clusters)
+    end
+    %% Step 1: User sends intent
+    User -- "1. Query " --> Agent
+    %% Step 2 & 3: Initial Reasoning Loop
+    Agent -- "2. Tool Planning Request" --> LLM
+    LLM -- "3. Action Plan (e.g., list_pods tool)" --> Agent
+    %% Step 4: Action Execution
+    Agent -- "4. Execute Tool via MCP" --> MCPServer
+    %% Step 5 & 6: Cluster Interaction
+    MCPServer -- "5. Secure Action " --> Kubernetes
+    Kubernetes -- "6. Raw Results / Status" --> MCPServer
+    %% Step 7: Raw results back to Agent
+    MCPServer -- "7. Raw Tool Output" --> Agent
+    %% Step 8 & 9: Final Interpretation Loop (Crucial step)
+    Agent -- "8. Interpret Raw Output" --> LLM
+    LLM -- "9. Formatted Final Answer" --> Agent
+    %% Step 10: Final Response to User
+    Agent -- "10. Final Conversational Response" --> User
+    %% Styles
+    style User fill:#e0f2f7,stroke:#1e88e5,stroke-width:2px
+    style Agent fill:#d4edda,stroke:#28a745,stroke-width:2px
+    style LLM fill:#fff3cd,stroke:#ffc107,stroke-width:2px
+    style MCPServer fill:#cce5ff,stroke:#007bff,stroke-width:2px
+    style Kubernetes fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+```
 ## Installation Steps
 
 1. Add the Helm Repository
@@ -117,5 +153,7 @@ namespacedRules:
       verbs:
         - get
 ```
+
+
 
 
