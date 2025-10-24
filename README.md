@@ -83,13 +83,39 @@ helm install rancher-ai-agent rancher-ai/agent \
 -f values.yaml: Applies your custom LLM configuration.
 
 ## Accessing the UI
-Once the agent is installed, you can use the UI extension or use the temporary UI through the Rancher API proxy.
+Once the agent is installed, you need to install the UI extension
 
-Note: This is a temporary endpoint for development and will be replaced by a UI extension in the future.
+## RBAC
 
-Construct the URL by replacing yourRancherURL with your Rancher server's address:
+To use the AI agent a user needs get permission to the 'llm-config' secret and the 'http:rancher-ai-agent:80' services/proxy.
 
-https://<yourRancherURL>/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent
+NOTE: This is a temporary solution.
+The following GlobalRole can be used to grant permissions to use the AI Agent:
 
+```
+apiVersion: management.cattle.io/v3
+displayName: ai
+kind: GlobalRole
+metadata:
+  name: ai-agent
+namespacedRules:
+  cattle-ai-agent-system:
+    - apiGroups:
+        - ''
+      resourceNames:
+        - http:rancher-ai-agent:80
+      resources:
+        - services/proxy
+      verbs:
+        - get
+    - apiGroups:
+        - ''
+      resourceNames:
+        - llm-config
+      resources:
+        - secrets
+      verbs:
+        - get
+```
 
 
