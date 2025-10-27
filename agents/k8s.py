@@ -1,8 +1,9 @@
 import os
 import json
+import logging
 import langgraph.types 
 
-from typing import Annotated, Sequence, TypedDict, Dict
+from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
@@ -13,9 +14,6 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
-from langgraph.runtime import Runtime
-from dataclasses import dataclass
-from typing import Dict
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -207,10 +205,11 @@ def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     if not os.path.exists(doc_path) or not os.listdir(doc_path):
         raise FileNotFoundError("The directory /rancher_docs does not exist or is empty.")
     # load all markdown files in the directory
-    loader = DirectoryLoader(doc_path, glob="**/*.md")
+    logging.info(f"loading RAG documents")
+    loader = DirectoryLoader(path=doc_path, glob="**/*.md", show_progress=True)
     docs = loader.load()
-    print(f"→ {len(docs)} raw documents loaded")
-    # 
+    logging.info(f"RAG → {len(docs)} raw documents loaded")
+    
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,  # chunk size (characters)
         chunk_overlap=200,  # chunk overlap (characters)
