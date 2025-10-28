@@ -156,7 +156,7 @@ async def stream_agent_response(
         if event == "messages":
             chunk, metadata = data
             if metadata.get("langgraph_node") == "agent" and chunk.content:
-                await websocket.send_text(chunk.content)
+                await websocket.send_text(_extract_text_from_chunk_content(chunk.content))
         if event == "updates":
             if interrupt_value := data.get("__interrupt__"):
                 await websocket.send_text(interrupt_value[0].value)
@@ -310,3 +310,26 @@ The output should always be provided in Markdown format.
   - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
+
+def _extract_text_from_chunk_content(chunk_content: any) -> str:
+    """
+    Extracts the text content from a chunk received from the LLM.
+
+    This function handles different formats that LLMs might return:
+    1. A list of dictionaries, where each dictionary contains a 'text' key.
+       This is common for models like Gemini that might structure their output.
+    2. A single dictionary with a 'text' key.
+    3. A simple string or other direct content.
+
+    Args:
+        chunk_content: The content field from an LLM chunk.
+
+    Returns:
+        str: The extracted text content, or an empty string if no text is found.
+    """
+    if isinstance(chunk_content, list):
+        return "".join([item.get("text", "") for item in chunk_content if isinstance(item, dict)])
+    elif isinstance(chunk_content, dict) and "text" in chunk_content:
+        return chunk_content["text"]
+    
+    return str(chunk_content) if chunk_content is not None else ""
