@@ -206,7 +206,7 @@ def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
         raise FileNotFoundError("The directory /rancher_docs does not exist or is empty.")
     # load all markdown files in the directory
     logging.info(f"loading RAG documents")
-    loader = DirectoryLoader(path=doc_path, glob="**/*.md", show_progress=True)
+    loader = DirectoryLoader(path=doc_path, glob="**/*.md")
     docs = loader.load()
     logging.info(f"RAG → {len(docs)} raw documents loaded")
     
