@@ -112,7 +112,7 @@ def test_call_model_node_includes_system_prompt(mock_llm, mock_tools, mock_check
     state = {"messages": [fake_message]}
     config = MagicMock()
 
-    result = builder.call_model_node(state, config, MagicMock(context=MagicMock(context={})))
+    result = builder.call_model_node(state, config)
 
     assert result["messages"][0] == "llm_response"
     mock_llm.invoke.assert_called_once_with(["system_prompt", fake_message], config)

@@ -101,7 +101,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         prompt = request
 
                     if len(context) > 0:
-                        context_prompt = ". Use the following parameters when calling an appropriate tool only if required (e.g. ignore namespace if user is asking about a cluster-wide resource). Parameters are separated with ';'."
+                        context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
                         for key, value in context.items():
                             context_prompt += f"{key}:{value};"
                         prompt += context_prompt

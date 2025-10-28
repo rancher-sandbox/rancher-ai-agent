@@ -32,16 +32,9 @@ class MockWebSocket:
     async def send_text(self, data):
         self._send_queue.append(data)
 
-    async def close(self, code=1000):
+    async def close(self):
         self.closed = True
 
-""" @pytest.mark.parametrize("message, expected", [
-    ("<mcp_context>cluster=local</mcp_context>", ("cluster", "local")),
-    ("just a normal message", None),
-])
-def test_is_context_message(message, expected):
-    assert is_context_message(message) == expected
- """
 @patch('main.ChatOllama')
 def test_get_llm_ollama(mock_chat_ollama):
     with patch.dict(os.environ, {"MODEL": "test-model", "OLLAMA_URL": "http://localhost:11434"}, clear=True):
@@ -124,7 +117,6 @@ async def test_websocket_endpoint(mock_dependencies):
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
     assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "test message"}]}
     assert call_kwargs['websocket'] == mock_ws
-    assert call_kwargs['context'] == {}
 
     assert not mock_ws.closed
 
@@ -141,8 +133,6 @@ async def test_websocket_endpoint_context_message(mock_dependencies):
     mock_dependencies["create_k8s_agent"].assert_called_once_with("fake_llm", ["fake_tool"], "fake_prompt", ANY)
     mock_dependencies["stream_agent_response"].assert_awaited_once()
     call_kwargs = mock_dependencies["stream_agent_response"].call_args.kwargs
-    assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "show all pods"}]}
+    assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": "show all pods. Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n namespace:default;cluster:local;"}]}
     assert call_kwargs['websocket'] == mock_ws
-    assert call_kwargs['context'] == {"cluster": "local", "namespace": "default"}
-
 
