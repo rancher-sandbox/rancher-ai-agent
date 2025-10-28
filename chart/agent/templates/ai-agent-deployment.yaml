@@ -44,6 +44,11 @@ spec:
               secretKeyRef:
                 name: llm-config
                 key: GOOGLE_API_KEY
+          - name: ACTIVE_LLM
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: ACTIVE_LLM
           - name: SYSTEM_PROMPT
             valueFrom:
               secretKeyRef:

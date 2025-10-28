@@ -23,7 +23,6 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langfuse.langchain import CallbackHandler
-from langfuse import get_client
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -90,19 +89,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 langfuse_handler = CallbackHandler()
                 config["callbacks"] = [langfuse_handler]
 
-            try:
-                while True:
+            while True:
+                try:
                     request = await websocket.receive_text()
                     context = {}
                     try:
                         json_request = json.loads(request)
-                        context = json_request["context"]
-                        prompt = json_request["prompt"]
+                        context = json_request.get("context", {})
+                        prompt = json_request.get("prompt", {})
                     except json.JSONDecodeError:
                         prompt = request
 
                     if len(context) > 0:
-                        context_prompt = ". Use the following parameters *only* when calling an appropriate tool. Parameters are separated with ';'."
+                        context_prompt = ". Use the following parameters when calling an appropriate tool only if required (e.g. ignore namespace if user is asking about a cluster-wide resource). Parameters are separated with ';'."
                         for key, value in context.items():
                             context_prompt += f"{key}:{value};"
                         prompt += context_prompt
@@ -111,14 +110,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         agent=agent,
                         input_data={"messages": [{"role": "user", "content": prompt}]},
                         config=config,
-                        websocket=websocket,
-                        context=context)
-            except WebSocketDisconnect:
-                logging.info(f"Client {websocket.client.host} disconnected.")
-            except Exception as e:
-                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}<error>')
-                logging.error(f"An error occurred: {e}")
-                await websocket.close()
+                        websocket=websocket)
+                except WebSocketDisconnect:
+                    logging.info(f"Client {websocket.client.host} disconnected.")
+                    break
+                except Exception as e:
+                    await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+                    logging.error(f"An error occurred: {e}")
+                finally:
+                    await websocket.send_text("</message>")
 
 # This is the UI for testing. This will be replaced by the UI extension
 @app.get("/agent")
@@ -135,7 +135,6 @@ async def stream_agent_response(
     input_data: dict[str, list[dict[str, str]]],
     config: dict,
     websocket: WebSocket,
-    context: dict,
 ) -> None:
     """
     Streams the agent's response to a WebSocket connection, handling interruptions.
@@ -145,36 +144,32 @@ async def stream_agent_response(
         input_data: The input data for the agent's run.
         config: The run configuration.
         websocket: The WebSocket connection.
-        context: The context for default tool parameter values.
         stream_mode: The types of events to stream from the agent.
     """
 
     await websocket.send_text("<message>")
-    try:
-        async for event, data in agent.astream(
-            input_data,
-            config=config,
-            stream_mode=["updates", "messages", "custom"]
-        ):
-            if event == "messages":
-                chunk, metadata = data
-                if metadata.get("langgraph_node") == "agent" and chunk.content:
-                    await websocket.send_text(chunk.content)
-            if event == "updates":
-                if interrupt_value := data.get("__interrupt__"):
-                    await websocket.send_text(interrupt_value[0].value)
-                    # Receive user response for the human verification
-                    user_response = await websocket.receive_text()
-                    await stream_agent_response(
-                        agent=agent,
-                        input_data=Command(resume={"response": user_response}),
-                        config=config,
-                        websocket=websocket,
-                        context=context)
-            if event == "custom":
-                await websocket.send_text(data)
-    finally:
-        await websocket.send_text("</message>")
+    async for event, data in agent.astream(
+        input_data,
+        config=config,
+        stream_mode=["updates", "messages", "custom"]
+    ):
+        if event == "messages":
+            chunk, metadata = data
+            if metadata.get("langgraph_node") == "agent" and chunk.content:
+                await websocket.send_text(chunk.content)
+        if event == "updates":
+            if interrupt_value := data.get("__interrupt__"):
+                await websocket.send_text(interrupt_value[0].value)
+                # Receive user response for the human verification
+                user_response = await websocket.receive_text()
+                await stream_agent_response(
+                    agent=agent,
+                    input_data=Command(resume={"response": user_response}),
+                    config=config,
+                    websocket=websocket)
+        if event == "custom":
+            await websocket.send_text(data)
+    
 
 def get_llm() -> BaseLanguageModel:
     """
@@ -190,19 +185,27 @@ def get_llm() -> BaseLanguageModel:
     model = os.environ.get("MODEL")
     if not model:
         raise ValueError("LLM Model not configured.")
-
+    
+    active = os.environ.get("ACTIVE_CHATBOT", "")
     ollama_url = os.environ.get("OLLAMA_URL")
+    gemini_key = os.environ.get("GOOGLE_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+
+    if active == "ollama":
+        return ChatOllama(model=model, base_url=ollama_url)
+    if active == "gemini":
+        return ChatGoogleGenerativeAI(model=model)
+    if active == "openai":
+        return OpenAI(model=model)
+
+    # default order if active is not specified
     if ollama_url:
         return ChatOllama(model=model, base_url=ollama_url)
-                          
-    gemini_key = os.environ.get("GOOGLE_API_KEY")
     if gemini_key:
         return ChatGoogleGenerativeAI(model=model)
-    
-    openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
         return OpenAI(model=model)
-    
+
     raise ValueError("LLM not configured.")
 
 def get_llm_embeddings() -> Embeddings:

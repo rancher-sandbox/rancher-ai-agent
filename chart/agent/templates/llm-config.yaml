@@ -10,6 +10,7 @@ stringData:
   MODEL: "{{ .Values.llmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
+  ACTIVE_LLM: "{{ .Values.activeLlm }}"
   ENABLE_RAG: "{{ .Values.rag.enabled }}"
   EMBEDDINGS_MODEL: "{{ .Values.rag.embeddings_model }}"
   LANGFUSE_HOST: "{{ .Values.langfuseHost }}"
