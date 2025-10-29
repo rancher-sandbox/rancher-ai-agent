@@ -32,6 +32,8 @@ init_config = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+        logging.getLogger().setLevel(LOG_LEVEL)
         init_config["llm"] = get_llm()
         logging.info(f"Using model: {init_config['llm']}")
         # if ENABLE_RAG flag is set, initialize the RAG retriever tool
@@ -59,6 +61,8 @@ async def websocket_endpoint(websocket: WebSocket):
     handles the back-and-forth communication with the client.
     """
     await websocket.accept()
+    logging.debug("ws connection opened")
+
     cookies = websocket.cookies
     rancher_url = "https://"+websocket.url.hostname
     if websocket.url.port:
@@ -123,6 +127,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         break
                 finally:
                     await websocket.send_text("</message>")
+            
+    logging.debug("ws connection closed")
 
 # This is the UI for testing. This will be replaced by the UI extension
 @app.get("/agent")

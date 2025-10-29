@@ -66,6 +66,8 @@ class K8sAgentBuilder:
         response = self.llm_with_tools.invoke(messages)
         new_messages = [RemoveMessage(id=m.id) for m in messages[:-3]]
         new_messages = new_messages + [response]
+
+        logging.debug("summarizing conversation")
         
         return {"summary": response.content, "messages": new_messages}
 
@@ -84,8 +86,11 @@ class K8sAgentBuilder:
 
         Returns:
             A dictionary containing the LLM's response message."""
-
+        
+        logging.debug("calling model")
         response = self.llm_with_tools.invoke([self.system_prompt] + state["messages"], config)
+        logging.debug("model call finished")
+
 
         return {"messages": [response]}
 
@@ -109,7 +114,9 @@ class K8sAgentBuilder:
                 return {"messages": "the tool execution was cancelled by the user."}
             
             try:
+                logging.debug("calling tool")
                 tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+                logging.debug("tool call finished")
                 processed_result = _process_tool_result(tool_result)
                 outputs.append(
                     ToolMessage(
@@ -208,8 +215,7 @@ def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     logging.info(f"loading RAG documents")
     loader = DirectoryLoader(path=doc_path, glob="**/*.md")
     docs = loader.load()
-    logging.info(f"RAG → {len(docs)} raw documents loaded")
-    
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,  # chunk size (characters)
         chunk_overlap=200,  # chunk overlap (characters)
@@ -220,6 +226,8 @@ def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     vector_store = InMemoryVectorStore(embedding_model)  
     vector_store.add_documents(documents=all_splits)
     retriever = vector_store.as_retriever(search_kwargs={"k": 6})
+
+    logging.info(f"RAG → {len(docs)} raw documents loaded")
 
     return retriever    
 

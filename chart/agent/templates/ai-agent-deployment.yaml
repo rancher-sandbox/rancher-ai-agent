@@ -29,55 +29,68 @@ spec:
               secretKeyRef:
                 name: llm-config
                 key: OPENAI_API_KEY
+                optional: true
           - name: MODEL
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: MODEL
+                optional: true
           - name: OLLAMA_URL
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: OLLAMA_URL
+                optional: true
           - name: GOOGLE_API_KEY
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: GOOGLE_API_KEY
+                optional: true
           - name: ACTIVE_LLM
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: ACTIVE_LLM
+                optional: true
           - name: SYSTEM_PROMPT
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: SYSTEM_PROMPT
+                optional: true
           - name: ENABLE_RAG
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: ENABLE_RAG
+                optional: true
           - name: EMBEDDINGS_MODEL
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: EMBEDDINGS_MODEL
+                optional: true
           - name: LANGFUSE_PUBLIC_KEY
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: LANGFUSE_PUBLIC_KEY
+                optional: true
           - name: LANGFUSE_SECRET_KEY
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: LANGFUSE_SECRET_KEY
+                optional: true
           - name: LANGFUSE_HOST
             valueFrom:
               secretKeyRef:
                 name: llm-config
                 key: LANGFUSE_HOST
+                optional: true
+          - name: LOG_LEVEL
+            value: "{{ .Values.log.level }}"
         ports:
          - containerPort: 8000
