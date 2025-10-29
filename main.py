@@ -4,6 +4,7 @@ import json
 import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from starlette.websockets import WebSocketState
 from fastapi.responses import HTMLResponse
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -85,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
             config = {
                 "thread_id": thread_id,
             }
-            if "LANGFUSE_SECRET_KEY" in os.environ and "LANGFUSE_PUBLIC_KEY" in os.environ and "LANGFUSE_HOST" in os.environ:
+            if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
                 langfuse_handler = CallbackHandler()
                 config["callbacks"] = [langfuse_handler]
 
@@ -115,8 +116,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.info(f"Client {websocket.client.host} disconnected.")
                     break
                 except Exception as e:
-                    await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
                     logging.error(f"An error occurred: {e}")
+                    if websocket.application_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+                    else:
+                        break
                 finally:
                     await websocket.send_text("</message>")
 
