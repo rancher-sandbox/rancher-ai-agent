@@ -85,7 +85,7 @@ async def websocket_endpoint(websocket: WebSocket):
             config = {
                 "thread_id": thread_id,
             }
-            if "LANGFUSE_SECRET_KEY" in os.environ and "LANGFUSE_API_KEY" in os.environ and "LANGFUSE_HOST" in os.environ:
+            if "LANGFUSE_SECRET_KEY" in os.environ and "LANGFUSE_PUBLIC_KEY" in os.environ and "LANGFUSE_HOST" in os.environ:
                 langfuse_handler = CallbackHandler()
                 config["callbacks"] = [langfuse_handler]
 
