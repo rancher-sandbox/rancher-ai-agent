@@ -1,12 +1,12 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-agent
-    tag: v0.0.1-alpha.28
+    tag: v0.0.1-alpha.29
     pullPolicy: IfNotPresent
 mcp:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-mcp
-    tag: v0.0.1-alpha.21
+    tag: v0.0.1-alpha.22
     pullPolicy: IfNotPresent
 
 llmModel: ""
