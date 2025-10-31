@@ -18,6 +18,7 @@ class MockWebSocket:
         self.url.port = None
         self.client = MagicMock()
         self.client.host = "fake_client_host"
+        self.client_state = "connected"
         self._receive_queue = messages or []
         self._send_queue = []
 
