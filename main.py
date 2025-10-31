@@ -97,15 +97,9 @@ async def websocket_endpoint(websocket: WebSocket):
             while True:
                 try:
                     request = await websocket.receive_text()
-                    context = {}
-                    try:
-                        json_request = json.loads(request)
-                        context = json_request.get("context", {})
-                        prompt = json_request.get("prompt", {})
-                    except json.JSONDecodeError:
-                        prompt = request
-
-                    if len(context) > 0:
+                    
+                    prompt, context = _parse_websocket_request(request)
+                    if context:
                         context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
                         for key, value in context.items():
                             context_prompt += f"{key}:{value};"
@@ -121,12 +115,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
                 except Exception as e:
                     logging.error(f"An error occurred: {e}")
-                    if websocket.application_state == WebSocketState.CONNECTED:
+                    if websocket.client_state == WebSocketState.CONNECTED:
                         await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
                     else:
                         break
                 finally:
-                    await websocket.send_text("</message>")
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text("</message>")
             
     logging.debug("ws connection closed")
 
@@ -167,6 +162,7 @@ async def stream_agent_response(
             chunk, metadata = data
             if metadata.get("langgraph_node") == "agent" and chunk.content:
                 await websocket.send_text(_extract_text_from_chunk_content(chunk.content))
+
         if event == "updates":
             if interrupt_value := data.get("__interrupt__"):
                 await websocket.send_text(interrupt_value[0].value)
@@ -177,6 +173,7 @@ async def stream_agent_response(
                     input_data=Command(resume={"response": user_response}),
                     config=config,
                     websocket=websocket)
+                
         if event == "custom":
             await websocket.send_text(data)
     
@@ -343,3 +340,25 @@ def _extract_text_from_chunk_content(chunk_content: any) -> str:
         return chunk_content["text"]
     
     return str(chunk_content) if chunk_content is not None else ""
+
+def _parse_websocket_request(request: str) -> tuple[str, dict]:
+    """
+    Parses the incoming websocket request.
+
+    The request can be a JSON string with 'prompt' and 'context' keys,
+    or a plain text string.
+
+    Args:
+        request: The raw request string from the websocket.
+
+    Returns:
+        A tuple containing the prompt (str) and the context (dict).
+    """
+    try:
+        json_request = json.loads(request)
+        prompt = json_request.get("prompt", "")
+        context = json_request.get("context", {})
+        
+        return prompt, context
+    except json.JSONDecodeError:
+        return request, {}
