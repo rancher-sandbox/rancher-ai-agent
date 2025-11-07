@@ -2,6 +2,7 @@ import logging
 import os
 import json
 import uuid
+import certifi
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from starlette.websockets import WebSocketState
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
                 "retrieve_rancher_docs",
                 "Search and return relevant passages from local Rancher/SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.",
             )
+        if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
+            SimpleTruststore().set_truststore()
     except ValueError as e:
         logging.critical(e)
         raise e
@@ -68,8 +71,13 @@ async def websocket_endpoint(websocket: WebSocket):
     if websocket.url.port:
         rancher_url += ":"+str(websocket.url.port)
 
+    if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() == "true":
+        mcpUrl = "http://rancher-mcp-server"
+    else:
+        mcpUrl = "https://rancher-mcp-server"
+
     async with streamablehttp_client(
-        url="http://rancher-mcp-server",
+        url=mcpUrl,
         headers={
              "R_token":str(cookies.get("R_SESS")),
              "R_url":rancher_url
@@ -362,3 +370,34 @@ def _parse_websocket_request(request: str) -> tuple[str, dict]:
         return prompt, context
     except json.JSONDecodeError:
         return request, {}
+
+# This will be removed once https://github.com/modelcontextprotocol/python-sdk/pull/1177 is merged
+class SimpleTruststore:
+    def get_default(self):
+        """Get the default Python truststore"""
+        return certifi.where()
+
+    def create_combined(self, company_cert_path, output_path):
+        """Create truststore with public CAs + company cert"""
+        with open(output_path, "w") as combined:
+            # Add public CAs 
+            with open(certifi.where(), "r") as public_cas:
+                combined.write(public_cas.read())
+
+            # Add MCP self-signed cert
+            with open(company_cert_path, "r") as company:
+                combined.write("\n" + company.read())
+
+        return output_path
+    
+    def use_truststore(self, truststore_path):
+        """Set the global truststore"""
+        os.environ["SSL_CERT_FILE"] = truststore_path
+
+    def set_truststore(self):
+        company_cert_path = "/etc/tls/tls.crt"
+        output_path = "/combined.crt"
+        truststore_path = self.create_combined(
+            company_cert_path=company_cert_path, output_path=output_path
+        )
+        self.use_truststore(truststore_path=truststore_path)

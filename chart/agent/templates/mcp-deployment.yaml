@@ -15,6 +15,9 @@ spec:
       labels:
         app: rancher-mcp-server
     spec:
+      {{- if not .Values.insecureSkipTls }}
+      serviceAccountName: mcp-cert-rotator-sa
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -22,9 +25,9 @@ spec:
       containers:
       - image: "{{ .Values.mcp.image.repository }}:{{ .Values.mcp.image.tag }}"
         imagePullPolicy: "{{ .Values.mcp.image.pullPolicy }}"
-        name: agent
+        name: mcp-server
         ports:
-         - containerPort: 8000
+         - containerPort: 9092
         env:
           - name: INSECURE_SKIP_TLS
             value: "{{ .Values.insecureSkipTls }}"

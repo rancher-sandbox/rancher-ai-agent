@@ -19,6 +19,13 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if not .Values.insecureSkipTls }}
+      serviceAccountName: ca-reader-sa
+      volumes:
+        - name: mcp-ca-volume
+          secret:
+            secretName: mcp-ca
+      {{- end }}
       containers:
       - image: "{{ .Values.aiAgent.image.repository }}:{{ .Values.aiAgent.image.tag }}"
         imagePullPolicy: "{{ .Values.aiAgent.image.pullPolicy }}"
@@ -92,5 +99,12 @@ spec:
                 optional: true
           - name: LOG_LEVEL
             value: "{{ .Values.log.level }}"
+          - name: INSECURE_SKIP_TLS
+            value: "{{ .Values.insecureSkipTls }}"
         ports:
          - containerPort: 8000
+        {{- if not .Values.insecureSkipTls }}
+        volumeMounts:
+          - name: mcp-ca-volume
+            mountPath: /etc/tls
+        {{- end }}
