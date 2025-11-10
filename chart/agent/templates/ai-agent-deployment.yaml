@@ -24,7 +24,7 @@ spec:
       volumes:
         - name: mcp-ca-volume
           secret:
-            secretName: mcp-ca
+            secretName: cattle-mcp-ca
       {{- end }}
       containers:
       - image: "{{ .Values.aiAgent.image.repository }}:{{ .Values.aiAgent.image.tag }}"
@@ -107,4 +107,5 @@ spec:
         volumeMounts:
           - name: mcp-ca-volume
             mountPath: /etc/tls
+            readOnly: true
         {{- end }}

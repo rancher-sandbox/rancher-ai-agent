@@ -14,7 +14,7 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "update", "patch", "delete"]
-  resourceNames: ["mcp-ca", "mcp-cert"]
+  resourceNames: ["cattle-mcp-tls", "cattle-mcp-ca"]
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["create"]

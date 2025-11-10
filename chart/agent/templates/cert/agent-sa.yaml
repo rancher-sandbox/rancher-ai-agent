@@ -14,7 +14,7 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
-  resourceNames: ["mcp-ca"]
+  resourceNames: ["cattle-mcp-ca"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
