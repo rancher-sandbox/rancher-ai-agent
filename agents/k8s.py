@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import langgraph.types 
+import uuid
 
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
@@ -16,7 +17,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
 from langchain_community.document_loaders import DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter, ExperimentalMarkdownSyntaxTextSplitter
+from langchain_classic.chains.summarize.chain import load_summarize_chain
+from langchain_core.documents import Document
+from typing import List
+from langchain_core.stores import InMemoryStore
+from langchain_classic.retrievers import ParentDocumentRetriever
 
 class AgentState(TypedDict):
     """The state of the agent."""
@@ -196,6 +202,154 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     builder = K8sAgentBuilder(llm, tools, system_prompt, checkpointer)
 
     return builder.build()
+def init_rag_hierarchical_method2(embedding_model: Embeddings, llm: BaseChatModel) -> VectorStoreRetriever:
+    """
+    Creates a hierarchical retriever using ParentDocumentRetriever.
+    """
+    doc_path = os.environ.get("DOCS_PATH", "/rag_docs")
+    if not os.path.exists(doc_path) or not os.listdir(doc_path):
+        raise FileNotFoundError("The directory /rag_docs does not exist or is empty.")
+    
+    # 1. Load Documents
+    logging.info("Loading RAG documents...")
+    loader = DirectoryLoader(path=doc_path, glob="**/*.md")
+    raw_docs: List[Document] = loader.load()
+    logging.info(f"RAG → {len(raw_docs)} raw documents loaded")
+    # Split your website into big chunks
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1000 * 4, chunk_overlap=0)
+
+    # This text splitter is used to create the child documents. They should be small chunk size.
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=125*4)
+    vectorstore=InMemoryVectorStore(embedding_model)
+    docstore=InMemoryStore()
+    retriever = ParentDocumentRetriever(
+        vectorstore=vectorstore, 
+        docstore=docstore,
+        child_splitter=child_splitter,
+        parent_splitter=parent_splitter
+    )
+    # Add documents to the retriever in a task
+    logging.info(f"Starting adding docs.")
+    retriever.add_documents(raw_docs)
+    logging.info(f"Hierarchical RAG initialized successfully.")
+    return retriever
+def init_rag_rancher_hierarchical(embedding_model: Embeddings, llm: BaseChatModel) -> VectorStoreRetriever:
+    """
+    Creates a hierarchical retriever using ParentDocumentRetriever.
+    
+    This implementation correctly:
+    1. Summarizes each document using load_summarize_chain.
+    2. Embeds and stores ONLY the summaries in the vector_store.
+    3. Stores the full, small chunks in the doc_store.
+    4. Links them via a manually-controlled ID.
+    """
+    doc_path = os.environ.get("DOCS_PATH", "/rag_docs")
+    if not os.path.exists(doc_path) or not os.listdir(doc_path):
+        raise FileNotFoundError("The directory /rag_docs does not exist or is empty.")
+    
+    # 1. Load Documents
+    logging.info("Loading RAG documents...")
+    loader = DirectoryLoader(path=doc_path, glob="**/*.md")
+    raw_docs: List[Document] = loader.load()
+    logging.info(f"RAG → {len(raw_docs)} raw documents loaded")
+
+    # 2. Define Splitter and Stores
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    vector_store = InMemoryVectorStore(embedding_model) 
+    doc_store = InMemoryStore()
+
+    # PARENT splitter: Splits by Markdown headers
+    headers_to_split_on = [
+    ("#", "Header 1"),
+    ("##", "Header 2"),
+]
+    parent_splitter = ExperimentalMarkdownSyntaxTextSplitter(
+        headers_to_split_on=headers_to_split_on, 
+        strip_headers=False
+    )
+    # 3. Create the Summarization Chain
+    # We use 'stuff' to summarize each document file as a whole.
+    summarization_chain = load_summarize_chain(
+        llm, 
+        chain_type="stuff"
+    )
+
+    parent_summaries = []
+    parent_chunks_to_store = {}
+
+    logging.info("Starting document sectioning and summarization...")
+    
+    # 4. Process docs one by one
+    for doc in raw_docs:
+        # 4a. Split doc into PARENT chunks (sections)
+        parent_chunks = parent_splitter.split_text(doc.page_content)
+        
+        logging.info(f"Splitting '{doc.metadata.get('source')}' into {len(parent_chunks)} sections.")
+
+        for parent_chunk in parent_chunks:
+            # Generate a unique ID for this parent chunk
+            current_chunk_id = str(uuid.uuid4())
+            
+            # 4b. Store the PARENT CHUNK (section) in the doc_store
+            # We update its metadata to include the original source
+            parent_chunk.metadata["original_source"] = doc.metadata.get("source")
+            parent_chunks_to_store[current_chunk_id] = parent_chunk
+            
+            # 4c. Create and store the summary
+            try:
+                # Summarize the parent chunk
+                summary_result = summarization_chain.invoke([parent_chunk]) 
+                summary = summary_result['output_text']
+                
+                # Create the parent summary doc (for the vector store)
+                summary_doc = Document(
+                    page_content=summary, 
+                    metadata={
+                        "source": doc.metadata.get("source"),
+                        "title": parent_chunk.metadata.get("H1", doc.metadata.get("title", "Untitled Section")),
+                        "section_header": parent_chunk.metadata.get("H2", parent_chunk.metadata.get("H3")),
+                        # This ID is the link to the parent chunk in the doc_store
+                        "original_id": current_chunk_id 
+                    }
+                )
+                parent_summaries.append(summary_doc)
+            except Exception as e:
+                logging.error(f"Error summarizing chunk from {doc.metadata.get('source')}: {e}")
+                # Fallback: use a snippet
+                summary_doc = Document(
+                    page_content=parent_chunk.page_content[:400] + "...",
+                    metadata={
+                        "source": doc.metadata.get("source"),
+                        "title": parent_chunk.metadata.get("H1", doc.metadata.get("title", "Untitled Section")),
+                        "section_header": parent_chunk.metadata.get("H2", parent_chunk.metadata.get("H3")),
+                        "original_id": current_chunk_id
+                    }
+                )
+                parent_summaries.append(summary_doc)
+
+    # 5. Manually Populate the Stores
+    
+    # 5a. Populate Vector Store with SUMMARIES of sections
+    logging.info(f"Adding {len(parent_summaries)} section summaries to vector store.")
+    vector_store.add_documents(parent_summaries)
+    
+    # 5b. Populate Doc Store with full PARENT SECTION chunks
+    logging.info(f"Adding {len(parent_chunks_to_store)} parent sections to doc store.")
+    doc_store.mset(list(parent_chunks_to_store.items()))
+
+    # 6. Instantiate the Retriever
+    retriever = ParentDocumentRetriever(
+        vectorstore=vector_store,
+        docstore=doc_store,
+        id_key="original_id", # Links summaries to parent chunks
+        child_splitter=child_splitter,
+        search_kwargs={"k": 10}
+        # We can also set search_kwargs here, e.g., {'k': 5}
+        # to control how many sections are retrieved.
+    )
+
+    logging.info(f"Hierarchical (Section-based) RAG initialized successfully.")
+    return retriever
 
 def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     """
@@ -207,10 +361,10 @@ def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
     Returns:
         A VectorStoreRetriever that can be used to fetch relevant documents.
     """
-    # test if `/rancher_docs` exists and contains files
-    doc_path = os.environ.get("DOCS_PATH", "/rancher_docs")
+    # test if `/rag_docs` exists and contains files
+    doc_path = os.environ.get("DOCS_PATH", "/rag_docs")
     if not os.path.exists(doc_path) or not os.listdir(doc_path):
-        raise FileNotFoundError("The directory /rancher_docs does not exist or is empty.")
+        raise FileNotFoundError("The directory /rag_docs does not exist or is empty.")
     # load all markdown files in the directory
     logging.info(f"loading RAG documents")
     loader = DirectoryLoader(path=doc_path, glob="**/*.md")

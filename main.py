@@ -11,7 +11,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from agents import create_k8s_agent, init_rag_rancher
+from agents import create_k8s_agent, init_rag_rancher, init_rag_rancher_hierarchical
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
@@ -24,10 +24,24 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
 from langfuse.langchain import CallbackHandler
+import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
+
+async def init_rag_background(init_config):
+    """Run the slow RAG initialization in background."""
+    try:
+        retriever = await asyncio.to_thread(init_rag_rancher_hierarchical, get_llm_embeddings(), get_llm())
+        init_config["retriever_tool"] = create_retriever_tool(
+            retriever,
+            "retrieve_rancher_docs",
+            "Search and return relevant passages from local Rancher, Fleet and SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher and Fleet documentation.",
+        )
+        logging.info("RAG retriever initialized successfully in background.")
+    except Exception as e:
+        logging.error(f"Failed to initialize RAG retriever: {e}", exc_info=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,12 +52,7 @@ async def lifespan(app: FastAPI):
         logging.info(f"Using model: {init_config['llm']}")
         # if ENABLE_RAG flag is set, initialize the RAG retriever tool
         if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-            retriever = init_rag_rancher(get_llm_embeddings())
-            init_config["retriever_tool"] = create_retriever_tool(
-                retriever,
-                "retrieve_rancher_docs",
-                "Search and return relevant passages from local Rancher/SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.",
-            )
+            asyncio.create_task(init_rag_background(init_config))
     except ValueError as e:
         logging.critical(e)
         raise e
