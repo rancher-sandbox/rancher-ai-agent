@@ -15,7 +15,7 @@ from agents import create_k8s_agent, init_rag_rancher
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
-from langchain_openai import OpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
 from langchain_core.tools import create_retriever_tool
@@ -203,7 +203,7 @@ def get_llm() -> BaseLanguageModel:
     if active == "gemini":
         return ChatGoogleGenerativeAI(model=model)
     if active == "openai":
-        return OpenAI(model=model)
+        return ChatOpenAI(model=model)
 
     # default order if active is not specified
     if ollama_url:
@@ -211,7 +211,7 @@ def get_llm() -> BaseLanguageModel:
     if gemini_key:
         return ChatGoogleGenerativeAI(model=model)
     if openai_key:
-        return OpenAI(model=model)
+        return ChatOpenAI(model=model)
 
     raise ValueError("LLM not configured.")
 
