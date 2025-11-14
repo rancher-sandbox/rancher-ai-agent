@@ -105,7 +105,7 @@ async def test_websocket_endpoint(mock_dependencies):
 
     assert mock_ws.accepted
     mock_dependencies["streamablehttp_client"].assert_called_once_with(
-        url="http://rancher-mcp-server",
+        url="https://rancher-mcp-server",
         headers={
             "R_token": "fake_token",
             "R_url": "https://fake.hostname"

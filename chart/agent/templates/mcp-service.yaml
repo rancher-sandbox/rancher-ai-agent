@@ -11,4 +11,8 @@ spec:
       name: http
       targetPort: 9092
       protocol: TCP
+    - port: 443
+      name: https
+      targetPort: 9092
+      protocol: TCP
   type: ClusterIP
