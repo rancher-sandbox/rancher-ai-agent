@@ -18,6 +18,8 @@ from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetrieve
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
+
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -64,7 +66,7 @@ class K8sAgentBuilder:
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = self.llm_with_tools.invoke(messages)
-        new_messages = [RemoveMessage(id=m.id) for m in messages[:-3]]
+        new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
         new_messages = new_messages + [response]
 
         logging.debug("summarizing conversation")
@@ -91,7 +93,6 @@ class K8sAgentBuilder:
         response = self.llm_with_tools.invoke([self.system_prompt] + state["messages"], config)
         logging.debug("model call finished")
 
-
         return {"messages": [response]}
 
     async def tool_node(self, state: AgentState):
@@ -111,7 +112,11 @@ class K8sAgentBuilder:
         outputs = []
         for tool_call in state["messages"][-1].tool_calls:
             if not _handle_interrupt(tool_call):
-                return {"messages": "the tool execution was cancelled by the user."}
+                return {"messages": ToolMessage(
+                        content=INTERRUPT_CANCEL_MESSAGE,
+                        name=tool_call["name"],
+                        tool_call_id=tool_call["id"]
+                        )}
             
             try:
                 logging.debug("calling tool")
@@ -130,7 +135,7 @@ class K8sAgentBuilder:
 
         return {"messages": outputs}
     
-    def should_continue(self, state: AgentState):
+    def should_summarize_conversation(self, state: AgentState):
         """
         Determines the next step in the agent's workflow.
 
@@ -151,6 +156,15 @@ class K8sAgentBuilder:
             return "end"
         else:
             return "continue"
+        
+    def should_continue_after_interrupt(self, state: AgentState):
+        messages = state["messages"]
+        last_message = messages[-1]
+        if isinstance(last_message, ToolMessage) and last_message.content == INTERRUPT_CANCEL_MESSAGE:
+            return "end"
+        
+        return "continue"
+
 
     def build(self) -> CompiledStateGraph:
         """
@@ -166,14 +180,21 @@ class K8sAgentBuilder:
         workflow.set_entry_point("agent")
         workflow.add_conditional_edges(
             "agent",
-            self.should_continue,
+            self.should_summarize_conversation,
             {
                 "continue": "tools",
                 "summarize_conversation": "summarize_conversation",
                 "end": END,
             },
         )
-        workflow.add_edge("tools", "agent")
+        workflow.add_conditional_edges(
+            "tools",
+            self.should_continue_after_interrupt,
+            {
+                "continue": "agent",
+                "end": END,
+            },
+        )
         workflow.add_edge("summarize_conversation", END)
 
         return workflow.compile(checkpointer=self.checkpointer)

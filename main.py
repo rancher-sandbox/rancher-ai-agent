@@ -81,7 +81,7 @@ async def websocket_endpoint(websocket: WebSocket):
         headers={
              "R_token":str(cookies.get("R_SESS")),
              "R_url":rancher_url
-             }
+        }
     ) as (read, write, _):
         # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
         async with ClientSession(read, write) as session:
