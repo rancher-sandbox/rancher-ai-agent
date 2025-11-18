@@ -17,6 +17,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from ollama import ResponseError
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
@@ -73,6 +74,22 @@ class K8sAgentBuilder:
         
         return {"summary": response.content, "messages": new_messages}
 
+    def _invoke_llm_with_retry(self, messages: list, config: RunnableConfig):
+        """
+        Invokes the LLM, with a single retry for a tool call parsing error.
+        Models can sometimes hallucinate and produce malformed JSON for tool calls.
+        This method attempts the LLM call and retries if it fails with a specific
+        "error parsing tool" """
+        # 1 initial attempt + 1 retry
+        for attempt in range(2):
+            try:
+                return self.llm_with_tools.invoke(messages, config)
+            except ResponseError as e:
+                if "error parsing tool call:" in str(e.error) and attempt < 1:
+                    logging.warning(f"retrying due to tool call parsing error: {e.error}")
+                    continue
+                raise e
+
     def call_model_node(self, state: AgentState, config: RunnableConfig):
         """
         Invokes the language model with the current state and context.
@@ -90,7 +107,10 @@ class K8sAgentBuilder:
             A dictionary containing the LLM's response message."""
         
         logging.debug("calling model")
-        response = self.llm_with_tools.invoke([self.system_prompt] + state["messages"], config)
+
+        messages = [self.system_prompt] + state["messages"]
+        response = self._invoke_llm_with_retry(messages, config)
+
         logging.debug("model call finished")
 
         return {"messages": [response]}
