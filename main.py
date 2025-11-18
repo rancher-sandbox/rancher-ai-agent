@@ -201,7 +201,7 @@ def get_llm() -> BaseLanguageModel:
     if not model:
         raise ValueError("LLM Model not configured.")
     
-    active = os.environ.get("ACTIVE_CHATBOT", "")
+    active = os.environ.get("ACTIVE_LLM", "")
     ollama_url = os.environ.get("OLLAMA_URL")
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
