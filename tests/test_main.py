@@ -50,7 +50,7 @@ def test_get_llm_gemini(mock_chat_gemini):
         mock_chat_gemini.assert_called_once_with(model="gemini-pro")
         assert llm == mock_chat_gemini.return_value
 
-@patch('main.OpenAI')
+@patch('main.ChatOpenAI')
 def test_get_llm_openai(mock_openai):
     with patch.dict(os.environ, {"MODEL": "gpt-4", "OPENAI_API_KEY": "fake-key"}, clear=True):
         llm = get_llm()
@@ -105,7 +105,7 @@ async def test_websocket_endpoint(mock_dependencies):
 
     assert mock_ws.accepted
     mock_dependencies["streamablehttp_client"].assert_called_once_with(
-        url="https://rancher-mcp-server",
+        url="https://rancher-mcp-server.cattle-ai-agent-system.svc",
         headers={
             "R_token": "fake_token",
             "R_url": "https://fake.hostname"

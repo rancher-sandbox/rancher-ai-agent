@@ -1,6 +1,8 @@
 import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 from agents.k8s import K8sAgentBuilder
+from langchain_core.messages import ToolMessage
 
 class FakeMessage:
     def __init__(self, tool_calls=None):
@@ -55,7 +57,9 @@ async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock
     state = {"messages": [FakeMessage(tool_calls=[tool_call])]}
     result = await builder.tool_node(state)
 
-    assert result["messages"] == "the tool execution was cancelled by the user."
+    assert result["messages"].name == "patchKubernetesResource"
+    assert result["messages"].tool_call_id == "123"
+    assert result["messages"].content == "tool execution cancelled by the user"
 
 @pytest.mark.asyncio
 @patch("agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
