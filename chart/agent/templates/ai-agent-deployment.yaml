@@ -37,6 +37,12 @@ spec:
                 name: llm-config
                 key: OPENAI_API_KEY
                 optional: true
+          - name: OPENAI_URL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: OPENAI_URL
+                optional: true
           - name: MODEL
             valueFrom:
               secretKeyRef:

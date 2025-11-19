@@ -205,13 +205,17 @@ def get_llm() -> BaseLanguageModel:
     ollama_url = os.environ.get("OLLAMA_URL")
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_url = os.environ.get("OPENAI_URL")
 
     if active == "ollama":
         return ChatOllama(model=model, base_url=ollama_url)
     if active == "gemini":
         return ChatGoogleGenerativeAI(model=model)
     if active == "openai":
-        return ChatOpenAI(model=model)
+        if openai_url:
+            return ChatOpenAI(model=model, base_url=openai_url)
+        else:
+            return ChatOpenAI(model=model)
 
     # default order if active is not specified
     if ollama_url:
@@ -219,7 +223,10 @@ def get_llm() -> BaseLanguageModel:
     if gemini_key:
         return ChatGoogleGenerativeAI(model=model)
     if openai_key:
-        return ChatOpenAI(model=model)
+        if openai_url:
+            return ChatOpenAI(model=model, base_url=openai_url)
+        else:
+            return ChatOpenAI(model=model)
 
     raise ValueError("LLM not configured.")
 

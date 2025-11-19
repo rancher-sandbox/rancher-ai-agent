@@ -1,7 +1,7 @@
 aiAgent:
   image:
     repository: ghcr.io/rancher-sandbox/rancher-ai-agent
-    tag: v0.0.1-alpha.35
+    tag: v0.0.1-alpha.36
     pullPolicy: IfNotPresent
 mcp:
   image:
@@ -13,6 +13,7 @@ llmModel: ""
 ollamaUrl: ""
 googleApiKey:
 openaiApiKey:
+openaiUrl:
 activeLlm: # ollama, gemini, openai
 # Enable RAG with embedded rancher documentation
 rag:

@@ -6,6 +6,7 @@ metadata:
 type: Opaque
 stringData:
   OPENAI_API_KEY: "{{ .Values.openaiApiKey }}"
+  OPENAI_URL: "{{ .Values.openaiUrl }}"
   SYSTEM_PROMPT: {{ .Values.systemPrompt | quote }}
   MODEL: "{{ .Values.llmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
