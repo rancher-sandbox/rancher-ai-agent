@@ -350,6 +350,10 @@ def _process_tool_result(tool_result: str) -> str:
             writer = get_stream_writer()
             if writer:
                 writer(f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
+        if "docLinks" in json_result:
+            writer = get_stream_writer()
+            if writer:
+                writer(f"<mcp-doclinks>{json.dumps(json_result['docLinks'])}</mcp-doclinks>")
         
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
