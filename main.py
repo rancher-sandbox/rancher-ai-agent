@@ -12,18 +12,13 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from agents import create_k8s_agent, init_rag_rancher
+from agents import create_k8s_agent, fleet_documentation_retriever, init_retriever
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from langchain_openai import ChatOpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
-from langchain_core.tools import create_retriever_tool
-from langchain_core.embeddings import Embeddings
-from langchain_openai import OpenAIEmbeddings
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_ollama import OllamaEmbeddings
 from langfuse.langchain import CallbackHandler
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -37,14 +32,9 @@ async def lifespan(app: FastAPI):
         logging.getLogger().setLevel(LOG_LEVEL)
         init_config["llm"] = get_llm()
         logging.info(f"Using model: {init_config['llm']}")
-        # if ENABLE_RAG flag is set, initialize the RAG retriever tool
         if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-            retriever = init_rag_rancher(get_llm_embeddings())
-            init_config["retriever_tool"] = create_retriever_tool(
-                retriever,
-                "retrieve_rancher_docs",
-                "Search and return relevant passages from local Rancher/SUSE documentation. Always use the retrieve_rancher_docs tool when relevant to fetch up-to-date Rancher documentation.",
-            )
+            init_retriever()
+            init_config["retriever_tool"] = fleet_documentation_retriever
         if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
             SimpleTruststore().set_truststore()
     except ValueError as e:
@@ -139,7 +129,7 @@ async def get(request: Request):
     """Serves the main HTML page for the chat client."""
     with open("index.html") as f:
         html_content = f.read()
-        modified_html = html_content.replace("{{ url }}", request.url.hostname)
+        modified_html = html_content.replace("{{ url }}", "localhost:8000")
 
     return HTMLResponse(modified_html)
 
@@ -229,38 +219,6 @@ def get_llm() -> BaseLanguageModel:
             return ChatOpenAI(model=model)
 
     raise ValueError("LLM not configured.")
-
-def get_llm_embeddings() -> Embeddings:
-    """
-    Selects and returns an embedding model instance based on environment variables.
-
-    Returns:
-        An instance of a LangChain embedding model that implements the Embeddings interface.
-
-    Raises:
-        ValueError: If a required environment variable (like EMBEDDING_MODEL for Ollama) is missing,
-                    or if no supported embedding provider is configured at all.
-    """
-
-     # Provider 1: Ollama
-    ollama_url = os.environ.get("OLLAMA_URL")
-    embedding_model_name = os.environ.get("EMBEDDINGS_MODEL")
-    if not embedding_model_name:
-            raise ValueError("EMBEDDINGS_MODEL must be set.")
-    if ollama_url:
-        return OllamaEmbeddings(model=embedding_model_name, base_url=ollama_url)
-
-    # Provider 2: Google Gemini
-    gemini_key = os.environ.get("GOOGLE_API_KEY")
-    if gemini_key:
-        return GoogleGenerativeAIEmbeddings(model=embedding_model_name)
-
-    # Provider 3: OpenAI
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    if openai_key:
-            return OpenAIEmbeddings(model=embedding_model_name)
-
-    raise ValueError("No embedding provider configured. Set OLLAMA_URL, GOOGLE_API_KEY, or OPENAI_API_KEY.")
 
 def get_system_prompt() -> str:
     """
