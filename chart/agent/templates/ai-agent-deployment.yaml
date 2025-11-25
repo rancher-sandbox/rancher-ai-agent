@@ -128,6 +128,5 @@ spec:
         {{- if .Values.rag.pvc }}
           - name: rag-storage
             mountPath: /app/rag
-            readOnly: true
         {{- end }}
         {{- end }}

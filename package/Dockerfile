@@ -18,13 +18,19 @@ RUN apk add --no-cache wget && \
     tar -xvzf rancher-docs.tar.gz --strip-components=1
 
 # Use a single RUN command with a shell 'if' statement
-RUN mkdir /rancher_docs && \
+RUN mkdir /rancher_docs && mkdir /fleet_docs &&\
     if [ "${COPY_ALL_DOCS}" = "true" ]; then \
         mv /tmp/src/docs/* /rancher_docs/; \
     else \
         mv /tmp/src/docs/troubleshooting /rancher_docs/ && \
         mv /tmp/src/docs/reference-guides /rancher_docs/; \
     fi
+
+# Copy fleet docs
+RUN apk add --no-cache git && \
+    git clone https://github.com/rancher/fleet-docs.git && \
+    mv fleet-docs/docs/* /fleet_docs
+
 
 #TODO - add more documentation as needed
 #TODO - add RAG data cleanup
@@ -48,5 +54,7 @@ RUN uv pip install --system -r pyproject.toml
 COPY . .
 
 COPY --from=docs-builder /rancher_docs /rancher_docs
+COPY --from=docs-builder /fleet_docs /fleet_docs
+
 
 CMD ["fastapi", "run"]
