@@ -353,7 +353,7 @@ def _process_tool_result(tool_result: str) -> str:
         if "docLinks" in json_result:
             writer = get_stream_writer()
             for link in json_result['docLinks']:
-                writer(f"<mcp-doclinks>{link}</mcp-doclinks>")
+                writer(f"<mcp-doclink>{link}</mcp-doclink>")
         
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
