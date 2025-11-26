@@ -72,7 +72,7 @@ def _clean_rag_stores_if_needed():
     deployment.
     """
     try:
-        config.load_kube_config() 
+        config.load_incluster_config() 
         v1_apps = client.AppsV1Api()
         deployment = v1_apps.read_namespaced_deployment(name=AGENT_DEPLOYMENT, namespace=AGENT_NAMESPACE)
         annotations = deployment.metadata.annotations
