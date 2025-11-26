@@ -1,32 +1,36 @@
-{{- if not .Values.insecureSkipTls }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ca-reader-sa
+  name: agent-sa
   namespace: cattle-ai-agent-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: ca-reader-role
+  name: agent-role
   namespace: cattle-ai-agent-system
 rules:
+{{- if not .Values.insecureSkipTls }}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
   resourceNames: ["cattle-mcp-ca"]
+{{- end }}
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "update", "patch"]
+  resourceNames: ["rancher-ai-agent"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: bind-ca-reader
+  name: bind-agent-sa
   namespace: cattle-ai-agent-system
 subjects:
 - kind: ServiceAccount
-  name: ca-reader-sa
+  name: agent-sa
   namespace: cattle-ai-agent-system
 roleRef:
   kind: Role
-  name: ca-reader-role
+  name: agent-role
   apiGroup: rbac.authorization.k8s.io
-{{- end }}

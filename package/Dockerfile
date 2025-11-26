@@ -8,7 +8,7 @@ FROM alpine:latest AS docs-builder
 
 ARG DOCS_URL=https://github.com/rancher/rancher-docs/archive/refs/tags/initial-snapshot-v2.12.2.tar.gz
 # Add a build argument to control which docs are copied. Defaults to 'false'.
-ARG COPY_ALL_DOCS=false
+ARG COPY_ALL_DOCS=true
 
 LABEL stage="docs-builder"
 WORKDIR /tmp/src

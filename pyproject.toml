@@ -23,4 +23,5 @@ dependencies = [
     "unstructured>=0.18.15",
     "unstructured[md]>=0.18.15",
     "langchain-chroma>=1.0.0",
+    "kubernetes>=34.1.0",
 ]

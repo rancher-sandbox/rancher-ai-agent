@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import shutil
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -14,10 +15,14 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_ollama import OllamaEmbeddings
+from kubernetes import client, config
 
 FLEET_BASE_URL = "https://fleet.rancher.io"
 RANCHER_BASE_URL = "https://ranchermanager.docs.rancher.com"
 RAG_ADD_DOCS_BATCH_SIZE = 100
+AGENT_DEPLOYMENT = "rancher-ai-agent"
+AGENT_NAMESPACE = "cattle-ai-agent-system"
+RAG_CLEANUP_ANNOTATION = "agent.cattle.io/rag-cleanup"
 
 VECTOR_STORE_DIR = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore")
 DOC_STORE_DIR = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore")
@@ -34,10 +39,13 @@ def init_rag_retriever():
     and adds them to the persistent stores. This ensures that the document loading
     and embedding process only runs once.
     """
-    fleet_vector_store_dir = VECTOR_STORE_DIR + "/fleet"
-    fleet_docstore_dir = DOC_STORE_DIR + "/fleet"
-    rancher_vector_store_dir = VECTOR_STORE_DIR + "/rancher"
-    rancher_docstore_dir = DOC_STORE_DIR + "/rancher"
+    embedding_model_name = os.environ.get("EMBEDDINGS_MODEL")
+    fleet_vector_store_dir = VECTOR_STORE_DIR + "/" + embedding_model_name + "/fleet"
+    fleet_docstore_dir = DOC_STORE_DIR + "/" + embedding_model_name + "/fleet"
+    rancher_vector_store_dir = VECTOR_STORE_DIR + "/" + embedding_model_name + "/rancher"
+    rancher_docstore_dir = DOC_STORE_DIR + "/" + embedding_model_name + "/rancher"
+
+    _clean_rag_stores_if_needed()
 
     fleet_retriever = hierarchical_retriever(fleet_vector_store_dir, fleet_docstore_dir, _get_llm_embeddings())
 
@@ -51,6 +59,47 @@ def init_rag_retriever():
         logging.info(f"loading Rancher RAG documents")
         _load_and_add_docs(rancher_retriever, RANCHER_DOC_PATH)
 
+def _clean_rag_stores_if_needed():
+    """
+    Checks for a specific annotation on the agent's deployment to trigger a cleanup of the RAG stores.
+
+    This function is intended to be called on startup. It connects to the Kubernetes
+    cluster to inspect its own deployment. If the `agent.cattle.io/rag-cleanup`
+    annotation is found, it proceeds to delete the entire vector store and document
+    store directories. After a successful deletion, it removes the annotation from
+    the deployment to prevent the cleanup from running on subsequent restarts. This
+    allows for a manual trigger to reset the RAG stores by simply annotating the
+    deployment.
+    """
+    try:
+        config.load_kube_config() 
+        v1_apps = client.AppsV1Api()
+        deployment = v1_apps.read_namespaced_deployment(name=AGENT_DEPLOYMENT, namespace=AGENT_NAMESPACE)
+        annotations = deployment.metadata.annotations
+        logging.error(f"annotations: {annotations}")
+        
+        if annotations and RAG_CLEANUP_ANNOTATION in annotations:
+            try:
+                shutil.rmtree(VECTOR_STORE_DIR)
+                shutil.rmtree(DOC_STORE_DIR)
+                logging.info(f"Successfully cleaned RAG stores")
+                patch_body = [
+                    {
+                        "op": "remove",
+                        "path": f"/metadata/annotations/agent.cattle.io~1rag-cleanup"
+                    }
+                ]        
+                v1_apps.patch_namespaced_deployment(name=AGENT_DEPLOYMENT, namespace=AGENT_NAMESPACE, body=patch_body)
+                logging.info(f"Successfully removed annotation {RAG_CLEANUP_ANNOTATION} from deployment.")
+            except OSError as e:
+                logging.error(f"Error deleting directories: {e}")    
+            except client.ApiException as e:
+                logging.error(f"Error deleting RAG cleanup annotation: {e}")    
+                        
+    except client.ApiException as e:
+        logging.error(f"Kubernetes API Exception: {e}")
+    except config.ConfigException as e:
+        logging.error(f"Kubernetes Configuration Exception: {e}")
 
 @tool("fleet_documentation_retriever", description="A specialized Fleet Documentation Retriever tool. MUST be called for any question related to Fleet, Fleet documentation, resources, GitRepo, Bundle") 
 def fleet_documentation_retriever(query: str) -> str:

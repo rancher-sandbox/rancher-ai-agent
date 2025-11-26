@@ -19,9 +19,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if not .Values.insecureSkipTls }}
-      serviceAccountName: ca-reader-sa
-      {{- end }}
+      serviceAccountName: agent-sa
       {{- if or (not .Values.insecureSkipTls) .Values.rag.pvc }}
       volumes:
       {{- if not .Values.insecureSkipTls }}
