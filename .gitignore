@@ -1,0 +1,3 @@
+__pycache__/
+./e2e/__pycache__
+./e2e/pytest_cache
