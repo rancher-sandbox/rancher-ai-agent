@@ -24,8 +24,9 @@ AGENT_DEPLOYMENT = "rancher-ai-agent"
 AGENT_NAMESPACE = "cattle-ai-agent-system"
 RAG_CLEANUP_ANNOTATION = "agent.cattle.io/rag-cleanup"
 
-VECTOR_STORE_DIR = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore")
-DOC_STORE_DIR = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore")
+EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDINGS_MODEL")
+VECTOR_STORE_DIR = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore") + "/" + EMBEDDING_MODEL_NAME
+DOC_STORE_DIR = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore") + "/" + EMBEDDING_MODEL_NAME
 FLEET_DOC_PATH = os.environ.get("FLEET_DOCS_PATH", "/fleet_docs")
 RANCHER_DOC_PATH = os.environ.get("RANCHER_DOCS_PATH", "/rancher_docs")
 
@@ -39,11 +40,10 @@ def init_rag_retriever():
     and adds them to the persistent stores. This ensures that the document loading
     and embedding process only runs once.
     """
-    embedding_model_name = os.environ.get("EMBEDDINGS_MODEL")
-    fleet_vector_store_dir = VECTOR_STORE_DIR + "/" + embedding_model_name + "/fleet"
-    fleet_docstore_dir = DOC_STORE_DIR + "/" + embedding_model_name + "/fleet"
-    rancher_vector_store_dir = VECTOR_STORE_DIR + "/" + embedding_model_name + "/rancher"
-    rancher_docstore_dir = DOC_STORE_DIR + "/" + embedding_model_name + "/rancher"
+    fleet_vector_store_dir = VECTOR_STORE_DIR + "/fleet"
+    fleet_docstore_dir = DOC_STORE_DIR + "/fleet"
+    rancher_vector_store_dir = VECTOR_STORE_DIR + "/rancher"
+    rancher_docstore_dir = DOC_STORE_DIR + "/rancher"
 
     _clean_rag_stores_if_needed()
 
@@ -116,8 +116,8 @@ def fleet_documentation_retriever(query: str) -> str:
     Returns:
         A JSON string with 'llm' and 'docLinks' keys.
     """
-    vectore_store_dir = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore") + "/fleet"
-    docstore_dir = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore") + "/fleet"
+    vectore_store_dir = VECTOR_STORE_DIR + "/fleet"
+    docstore_dir = DOC_STORE_DIR + "/fleet"
 
     retriever = hierarchical_retriever(vectore_store_dir, docstore_dir, _get_llm_embeddings())
 
@@ -149,8 +149,8 @@ def rancher_documentation_retriever(query: str) -> str:
     Returns:
         A JSON string with 'llm' and 'docLinks' keys.
     """
-    vectore_store_dir = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore") + "/rancher"
-    docstore_dir = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore") + "/rancher"
+    vectore_store_dir = VECTOR_STORE_DIR + "/rancher"
+    docstore_dir = DOC_STORE_DIR + "/rancher"
 
     retriever = hierarchical_retriever(vectore_store_dir, docstore_dir, _get_llm_embeddings())
 
