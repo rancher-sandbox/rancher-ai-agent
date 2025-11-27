@@ -24,7 +24,7 @@ AGENT_DEPLOYMENT = "rancher-ai-agent"
 AGENT_NAMESPACE = "cattle-ai-agent-system"
 RAG_CLEANUP_ANNOTATION = "agent.cattle.io/rag-cleanup"
 
-EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDINGS_MODEL")
+EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDINGS_MODEL", "")
 VECTOR_STORE_DIR = os.environ.get("RAG_VECTORSTORE_DIR", "/app/rag/vectorstore") + "/" + EMBEDDING_MODEL_NAME
 DOC_STORE_DIR = os.environ.get("RAG_DOCSTORE_DIR", "/app/rag/docstore") + "/" + EMBEDDING_MODEL_NAME
 FLEET_DOC_PATH = os.environ.get("FLEET_DOCS_PATH", "/fleet_docs")

@@ -1,4 +1,3 @@
-import os
 import json
 import logging
 import langgraph.types 
@@ -13,10 +12,6 @@ from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.embeddings import Embeddings
-from langchain_core.vectorstores import InMemoryVectorStore, VectorStoreRetriever
-from langchain_community.document_loaders import DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from ollama import ResponseError
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
@@ -237,40 +232,6 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     builder = K8sAgentBuilder(llm, tools, system_prompt, checkpointer)
 
     return builder.build()
-
-def init_rag_rancher(embedding_model: Embeddings) -> VectorStoreRetriever:
-    """
-    Creates a retriever for Rancher documentation using RAG (Retrieval-Augmented Generation).
-
-    Args:
-        embedding_model: The embedding model to use for creating document embeddings.
-
-    Returns:
-        A VectorStoreRetriever that can be used to fetch relevant documents.
-    """
-    # test if `/rancher_docs` exists and contains files
-    doc_path = os.environ.get("DOCS_PATH", "/rancher_docs")
-    if not os.path.exists(doc_path) or not os.listdir(doc_path):
-        raise FileNotFoundError("The directory /rancher_docs does not exist or is empty.")
-    # load all markdown files in the directory
-    logging.info(f"loading RAG documents")
-    loader = DirectoryLoader(path=doc_path, glob="**/*.md")
-    docs = loader.load()
-
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,  # chunk size (characters)
-        chunk_overlap=200,  # chunk overlap (characters)
-        add_start_index=True,  # track index in original document
-    )
-    all_splits = text_splitter.split_documents(docs)
-    # Initialize the vector store
-    vector_store = InMemoryVectorStore(embedding_model)  
-    vector_store.add_documents(documents=all_splits)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 6})
-
-    logging.info(f"RAG → {len(docs)} raw documents loaded")
-
-    return retriever    
 
 def _create_confirmation_response(payload: str, type: str, name: str, kind: str, cluster: str, namespace: str):
     """

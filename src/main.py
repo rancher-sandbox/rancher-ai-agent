@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever
+from .agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command

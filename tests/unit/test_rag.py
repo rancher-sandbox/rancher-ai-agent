@@ -3,7 +3,7 @@ import pytest
 import json
 from unittest.mock import patch, MagicMock, call
 
-from agents.rag import (
+from src.agents.rag import (
     _get_llm_embeddings,
     _transform_source_to_url,
     fleet_documentation_retriever,
@@ -12,21 +12,21 @@ from agents.rag import (
     hierarchical_retriever,
 )
 
-@patch('agents.rag.OllamaEmbeddings')
+@patch('src.agents.rag.OllamaEmbeddings')
 def test_get_llm_embeddings_ollama(mock_ollama_embeddings):
     with patch.dict(os.environ, {"EMBEDDINGS_MODEL": "test-model", "OLLAMA_URL": "http://localhost:11434"}, clear=True):
         embeddings = _get_llm_embeddings()
         mock_ollama_embeddings.assert_called_once_with(model="test-model", base_url="http://localhost:11434")
         assert embeddings == mock_ollama_embeddings.return_value
 
-@patch('agents.rag.GoogleGenerativeAIEmbeddings')
+@patch('src.agents.rag.GoogleGenerativeAIEmbeddings')
 def test_get_llm_embeddings_gemini(mock_google_embeddings):
     with patch.dict(os.environ, {"EMBEDDINGS_MODEL": "gemini-pro", "GOOGLE_API_KEY": "fake-key"}, clear=True):
         embeddings = _get_llm_embeddings()
         mock_google_embeddings.assert_called_once_with(model="gemini-pro")
         assert embeddings == mock_google_embeddings.return_value
 
-@patch('agents.rag.OpenAIEmbeddings')
+@patch('src.agents.rag.OpenAIEmbeddings')
 def test_get_llm_embeddings_openai(mock_openai_embeddings):
     with patch.dict(os.environ, {"EMBEDDINGS_MODEL": "gpt-4", "OPENAI_API_KEY": "fake-key"}, clear=True):
         embeddings = _get_llm_embeddings()
@@ -57,9 +57,9 @@ class MockDoc:
 
 @pytest.fixture
 def mock_fleet_rag_dependencies():
-    with patch('agents.rag._get_llm_embeddings', return_value=MagicMock()) as mock_get_embeddings, \
-         patch('agents.rag.hierarchical_retriever') as mock_hierarchical_retriever, \
-         patch('agents.rag.logging') as mock_logging:
+    with patch('src.agents.rag._get_llm_embeddings', return_value=MagicMock()) as mock_get_embeddings, \
+         patch('src.agents.rag.hierarchical_retriever') as mock_hierarchical_retriever, \
+         patch('src.agents.rag.logging') as mock_logging:
         
         mock_retriever = MagicMock()
         mock_retriever.invoke.return_value = [
@@ -91,9 +91,9 @@ def test_fleet_documentation_retriever(mock_fleet_rag_dependencies):
 
 @pytest.fixture
 def mock_rancher_rag_dependencies():
-    with patch('agents.rag._get_llm_embeddings', return_value=MagicMock()) as mock_get_embeddings, \
-         patch('agents.rag.hierarchical_retriever') as mock_hierarchical_retriever, \
-         patch('agents.rag.logging') as mock_logging:
+    with patch('src.agents.rag._get_llm_embeddings', return_value=MagicMock()) as mock_get_embeddings, \
+         patch('src.agents.rag.hierarchical_retriever') as mock_hierarchical_retriever, \
+         patch('src.agents.rag.logging') as mock_logging:
         
         mock_retriever = MagicMock()
         mock_retriever.invoke.return_value = [
@@ -123,11 +123,11 @@ def test_rancher_documentation_retriever(mock_rancher_rag_dependencies):
     }
     assert json.loads(result) == expected_json
 
-@patch('agents.rag.hierarchical_retriever')
-@patch('agents.rag._get_llm_embeddings')
+@patch('src.agents.rag.hierarchical_retriever')
+@patch('src.agents.rag._get_llm_embeddings')
 @patch('os.path.exists')
 @patch('os.listdir')
-@patch('agents.rag.DirectoryLoader')
+@patch('src.agents.rag.DirectoryLoader')
 def test_init_rag_retriever_creates_new_vectorestore(mock_loader, mock_listdir, mock_exists, mock_get_embeddings, mock_hierarchical_retriever):
     mock_exists.return_value = False
     mock_listdir.return_value = ["some_file.md"]
@@ -144,8 +144,8 @@ def test_init_rag_retriever_creates_new_vectorestore(mock_loader, mock_listdir, 
     mock_fleet_retriever.add_documents.assert_called_once_with(mock_docs)
     mock_rancher_retriever.add_documents.assert_called_once_with(mock_docs)
 
-@patch('agents.rag.hierarchical_retriever')
-@patch('agents.rag._get_llm_embeddings')
+@patch('src.agents.rag.hierarchical_retriever')
+@patch('src.agents.rag._get_llm_embeddings')
 @patch('os.path.exists')
 def test_init_rag_retriever_already_persisted(mock_exists, mock_get_embeddings, mock_hierarchical_retriever):
     mock_exists.return_value = True
@@ -159,10 +159,10 @@ def test_init_rag_retriever_already_persisted(mock_exists, mock_get_embeddings, 
     mock_fleet_retriever.add_documents.assert_not_called()
     mock_rancher_retriever.add_documents.assert_not_called()
 
-@patch('agents.rag.Chroma')
-@patch('agents.rag.LocalFileStore')
-@patch('agents.rag.create_kv_docstore')
-@patch('agents.rag.ParentDocumentRetriever')
+@patch('src.agents.rag.Chroma')
+@patch('src.agents.rag.LocalFileStore')
+@patch('src.agents.rag.create_kv_docstore')
+@patch('src.agents.rag.ParentDocumentRetriever')
 def test_hierarchical_retriever(mock_parent_retriever, mock_create_docstore, mock_file_store, mock_chroma):
     mock_embeddings = MagicMock()
     retriever = hierarchical_retriever("persist_dir", "docstore_dir", mock_embeddings)
