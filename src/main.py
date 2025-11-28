@@ -60,10 +60,11 @@ async def websocket_endpoint(websocket: WebSocket):
     if websocket.url.port:
         rancher_url += ":"+str(websocket.url.port)
 
+    mcpUrl = os.environ.get("MCP_URL", "rancher-mcp-server.cattle-ai-agent-system.svc")
     if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() == "true":
-        mcpUrl = "http://rancher-mcp-server.cattle-ai-agent-system.svc"
+        mcpUrl = "http://" + mcpUrl
     else:
-        mcpUrl = "https://rancher-mcp-server.cattle-ai-agent-system.svc"
+        mcpUrl = "https://" + mcpUrl
 
     async with streamablehttp_client(
         url=mcpUrl,

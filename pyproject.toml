@@ -21,6 +21,7 @@ dependencies = [
     "unstructured[md]>=0.18.15",
     "langchain-chroma>=1.0.0",
     "kubernetes>=34.1.0",
+    "fastmcp>=2.13.1",
 ]
 
 [dependency-groups]
