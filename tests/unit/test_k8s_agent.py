@@ -1,7 +1,7 @@
 import pytest
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from agents.k8s import K8sAgentBuilder
+from src.agents.k8s import K8sAgentBuilder
 from langchain_core.messages import ToolMessage
 
 class FakeMessage:
@@ -45,7 +45,7 @@ def test_builder_initialization_binds_tools(mock_llm, mock_tools, mock_checkpoin
     mock_llm.bind_tools.assert_called_once_with(mock_tools)
 
 @pytest.mark.asyncio
-@patch("agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
+@patch("src.agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
 async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock_checkpointer):
     """Tests that tool execution is cancelled if the user responds 'no' to the confirmation prompt."""
     builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
@@ -62,7 +62,7 @@ async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock
     assert result["messages"].content == "tool execution cancelled by the user"
 
 @pytest.mark.asyncio
-@patch("agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
+@patch("src.agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
 async def test_tool_node_human_verification_approved(mock_llm, mock_tools, mock_checkpointer):
     """Tests that tool execution proceeds if the user responds 'yes' to the confirmation prompt."""
     builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)

@@ -1,0 +1,35 @@
+name: Python Tests (using uv)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          
+      - name: Install uv
+        run: pip install uv
+        
+      - name: Install dependencies
+        run: uv sync --all-groups
+        
+      - name: Execute unit tests
+        run: uv run pytest tests/unit
+
+      - name: Execute integration tests
+        run: uv run pytest tests/integration
+

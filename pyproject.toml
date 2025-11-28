@@ -1,7 +1,7 @@
 [project]
-name = "mcpws"
+name = "rancher-ai-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Rancher AI agent"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,11 +17,17 @@ dependencies = [
     "langfuse>=3.3.4",
     "langgraph>=1.0.0",
     "mcp>=1.12.4",
-    "mock>=5.2.0",
-    "pytest>=8.4.2",
-    "pytest-asyncio>=1.2.0",
     "unstructured>=0.18.15",
     "unstructured[md]>=0.18.15",
     "langchain-chroma>=1.0.0",
     "kubernetes>=34.1.0",
+    "fastmcp>=2.13.1",
+]
+
+[dependency-groups]
+test = [
+    "testcontainers>=4.13.3",
+    "mock>=5.2.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
 ]

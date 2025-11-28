@@ -41,20 +41,17 @@ RUN apk add --no-cache git && \
 # installs runtime dependencies, and copies the prepared documentation
 # artifact from the first stage.
 # =================================================================
-FROM registry.suse.com/bci/python:3.12
+FROM registry.suse.com/bci/python:3.13
 
 WORKDIR /app
 
 RUN pip install uv
 
-COPY pyproject.toml .
+COPY . .
 
 RUN uv pip install --system -r pyproject.toml
-
-COPY . .
 
 COPY --from=docs-builder /rancher_docs /rancher_docs
 COPY --from=docs-builder /fleet_docs /fleet_docs
 
-
-CMD ["fastapi", "run"]
+CMD ["fastapi", "run", "src/main.py"]

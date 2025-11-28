@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 from fastapi import WebSocketDisconnect
 
-from main import (
+from src.main import (
     websocket_endpoint,
     get_llm,
 )
@@ -36,21 +36,21 @@ class MockWebSocket:
     async def close(self):
         self.closed = True
 
-@patch('main.ChatOllama')
+@patch('src.main.ChatOllama')
 def test_get_llm_ollama(mock_chat_ollama):
     with patch.dict(os.environ, {"MODEL": "test-model", "OLLAMA_URL": "http://localhost:11434"}, clear=True):
         llm = get_llm()
         mock_chat_ollama.assert_called_once_with(model="test-model", base_url="http://localhost:11434")
         assert llm == mock_chat_ollama.return_value
 
-@patch('main.ChatGoogleGenerativeAI')
+@patch('src.main.ChatGoogleGenerativeAI')
 def test_get_llm_gemini(mock_chat_gemini):
     with patch.dict(os.environ, {"MODEL": "gemini-pro", "GOOGLE_API_KEY": "fake-key"}, clear=True):
         llm = get_llm()
         mock_chat_gemini.assert_called_once_with(model="gemini-pro")
         assert llm == mock_chat_gemini.return_value
 
-@patch('main.ChatOpenAI')
+@patch('src.main.ChatOpenAI')
 def test_get_llm_openai(mock_openai):
     with patch.dict(os.environ, {"MODEL": "gpt-4", "OPENAI_API_KEY": "fake-key"}, clear=True):
         llm = get_llm()
@@ -69,14 +69,14 @@ def test_get_llm_no_provider():
 
 @pytest.fixture
 def mock_dependencies():
-    with patch('main.streamablehttp_client') as mock_streamable_http, \
-         patch('main.ClientSession') as mock_client_session, \
-         patch('main.load_mcp_tools', new_callable=AsyncMock) as mock_load_tools, \
-         patch('main.create_k8s_agent') as mock_create_agent, \
-         patch('main.get_system_prompt', return_value="fake_prompt"), \
-         patch('main.stream_agent_response', new_callable=AsyncMock) as mock_stream_response, \
-         patch('main.init_config', {"llm": "fake_llm"}), \
-         patch('main.logging') as mock_logging:
+    with patch('src.main.streamablehttp_client') as mock_streamable_http, \
+         patch('src.main.ClientSession') as mock_client_session, \
+         patch('src.main.load_mcp_tools', new_callable=AsyncMock) as mock_load_tools, \
+         patch('src.main.create_k8s_agent') as mock_create_agent, \
+         patch('src.main.get_system_prompt', return_value="fake_prompt"), \
+         patch('src.main.stream_agent_response', new_callable=AsyncMock) as mock_stream_response, \
+         patch('src.main.init_config', {"llm": "fake_llm"}), \
+         patch('src.main.logging') as mock_logging:
 
         mock_streamable_http.return_value.__aenter__.return_value = (AsyncMock(), AsyncMock(), None)
         mock_compiled_agent = MagicMock()
