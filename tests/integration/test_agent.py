@@ -99,9 +99,45 @@ def setup_mock_mcp_server(module_monkeypatch):
     process.terminate()
 
 @pytest.mark.parametrize(
-        ("fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
+        ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
         [
             (
+                ["fake prompt"],
+                [
+                    AIMessage(
+                        content="fake llm response",
+                    ),
+                ], 
+                [
+                    get_system_prompt(), 
+                    HumanMessage(content="fake prompt"), 
+                ],
+                ["<message>fake llm response</message>"]
+            ),
+            (
+                ["fake prompt 1",
+                 "fake prompt 2"],
+                [
+                    AIMessage(
+                        content="fake llm response 1",
+                    ),
+                     AIMessage(
+                        content="fake llm response 2",
+                    ),
+                ], 
+                [
+                    get_system_prompt(), 
+                    HumanMessage(content="fake prompt 1"), 
+                    AIMessage(
+                        content="fake llm response 1",
+                    ),
+                    HumanMessage(content="fake prompt 2"), 
+                ],
+                ["<message>fake llm response 1</message>",
+                 "<message>fake llm response 2</message>"]
+            ),
+            (
+                ["sum 4 + 5"],
                 [
                     AIMessage(
                         content="", # The content is empty when a tool is called
@@ -117,7 +153,7 @@ def setup_mock_mcp_server(module_monkeypatch):
                 ], 
                 [
                     get_system_prompt(), 
-                    HumanMessage(content="call add tool"), 
+                    HumanMessage(content="sum 4 + 5"), 
                     AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
                     ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
                 ],
@@ -125,21 +161,20 @@ def setup_mock_mcp_server(module_monkeypatch):
              )
         ]
 )
-def test_websocket_connection_and_agent_interaction(fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
+def test_websocket_connection_and_agent_interaction(prompts: list[str], fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
     """Tests the full agent interaction flow through a WebSocket connection."""
     fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
     init_config["llm"] = fake_llm
     
     messages = []
     with client.websocket_connect("/agent/ws") as websocket:
-        websocket.send_text("call add tool")
-        
-        receives_text = websocket.receive_text()
-        msg = receives_text
-        while not receives_text == "</message>":
-            receives_text = websocket.receive_text()
-            msg += receives_text
-        messages.append(msg)
+        for prompt in prompts:
+            websocket.send_text(prompt)
+            msg = ""
+            while not msg.endswith("</message>"):
+                msg += websocket.receive_text()
+
+            messages.append(msg)
         
     assert messages == expected_messages_send_to_websocket
     assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
