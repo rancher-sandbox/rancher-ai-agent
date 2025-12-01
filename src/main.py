@@ -197,7 +197,7 @@ def get_llm() -> BaseLanguageModel:
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     openai_url = os.environ.get("OPENAI_URL")
-    aws_bedrock_key = os.environ.get("OPENAI_URL")
+    aws_bedrock_key = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
 
     if active == "ollama":
         return ChatOllama(model=model, base_url=ollama_url)
