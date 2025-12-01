@@ -110,6 +110,18 @@ spec:
                 name: llm-config
                 key: LANGFUSE_HOST
                 optional: true
+          - name: AWS_BEARER_TOKEN_BEDROCK
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: AWS_BEARER_TOKEN_BEDROCK
+                optional: true
+          - name: AWS_REGION_NAME
+            valueFrom: 
+              secretKeyRef:
+                name: llm-config
+                key: AWS_REGION_NAME
+                optional: true
           - name: LOG_LEVEL
             value: "{{ .Values.log.level }}"
           - name: INSECURE_SKIP_TLS
