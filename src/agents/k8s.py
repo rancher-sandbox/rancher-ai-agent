@@ -147,6 +147,9 @@ class K8sAgentBuilder:
                 )
             except ToolException as e:
                 return {"messages": str(e)}
+            except Exception as e:
+                logging.error(f"unexpected error during tool call: {e}")
+                return {"messages": f"unexpected error during tool call: {e}"}
 
         return {"messages": outputs}
     
