@@ -197,7 +197,7 @@ def get_llm() -> BaseLanguageModel:
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     openai_url = os.environ.get("OPENAI_URL")
-    aws_bedrock_key = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+    aws_region = os.environ.get("AWS_REGION")
 
     if active == "ollama":
         return ChatOllama(model=model, base_url=ollama_url)
@@ -221,7 +221,7 @@ def get_llm() -> BaseLanguageModel:
             return ChatOpenAI(model=model, base_url=openai_url)
         else:
             return ChatOpenAI(model=model)
-    if aws_bedrock_key:
+    if aws_region:
         return ChatBedrock(model=model)
 
     raise ValueError("LLM not configured.")
