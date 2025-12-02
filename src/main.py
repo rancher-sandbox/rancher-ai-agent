@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from .agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever
+from .agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever, create_parent_agent, SubAgent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
@@ -20,12 +20,13 @@ from langchain_openai import ChatOpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
 from langfuse.langchain import CallbackHandler
+from langchain.agents import create_agent
+from langchain.tools import tool
 from langchain_aws import ChatBedrockConverse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -45,6 +46,116 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+def create_math_agent() -> CompiledStateGraph:
+    """
+    Creates a simple math agent that can sum two numbers.
+    
+    Returns:
+        A compiled LangGraph agent capable of summing two numbers.
+    """
+    @tool
+    def sum_two_numbers(a: int, b: int) -> int:
+        """Sum two numbers together.
+        
+        Args:
+            a: The first number to sum
+            b: The second number to sum
+        
+        Returns:
+            The sum of a and b
+        """
+        print("Summing", a, "and", b)
+        return a + b
+
+
+    return create_agent(model=get_llm(), tools=[sum_two_numbers])
+
+async def create_rancher_agent(websocket: WebSocket):
+    rancher_url = "https://raul-cabello.ngrok.app"
+    mcpUrl = "http://localhost:9092"
+
+    client_ctx = streamablehttp_client(
+        url=mcpUrl,
+        headers={
+             "R_token":"",
+             "R_url":rancher_url
+        }
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    # if ENABLE_RAG is true, add the retriever tools to the tools list
+    if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+
+    agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
+async def create_observability_agent():
+    client_ctx = streamablehttp_client(
+        url="http://localhost:9093",
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    agent = create_agent(init_config["llm"], tools)
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
+async def create_mlm_agent():
+    client_ctx = streamablehttp_client(
+        url="http://10.100.204.98:8000/mcp",
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    agent = create_agent(init_config["llm"], tools)
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
+
+async def create_security_agent():
+    rancher_url = "https://10.144.102.193.sslip.io/"
+    mcpUrl = "http://localhost:9092"
+
+    client_ctx = streamablehttp_client(
+        url=mcpUrl,
+        headers={
+             "R_token":"",
+             "R_url":rancher_url
+        }
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    agent = create_agent(init_config["llm"], tools)
+    return agent, session, client_ctx  # Return all three for cleanup
+
 @app.websocket("/agent/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -55,80 +166,92 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
     logging.debug("ws connection opened")
+    # TODO: don;t crash if one of the agents fails to create beacause MCP is down
+    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket)
+    rancher_agent_sub = SubAgent(
+        name="rancher-agent",
+        description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
+        agent=rancher_agent
+    )
+    suse_observability_agent, obs_session, obs_client_ctx = await create_observability_agent()
+    suse_observability_agent_sub = SubAgent(
+        name="suse-observability-agent",
+        description="Agent specialized in managing SUSE Observability resources. Use it to help with questions related to monitoring, metrics, logging, and tracing within Kubernetes clusters.",
+        agent=suse_observability_agent
+    )
+    suse_mlm_agent, mlm_session, mlm_client_ctx = await create_mlm_agent()
+    suse_mlm_agent_sub = SubAgent(
+        name="suse-mlm-agent",
+        description="Agent specialized in managing SUSE multilinux manager. Use it to help with questions related to system updates, linux systems.",
+        agent=suse_mlm_agent
+    )    
+    suse_security_agent, sec_session, sec_client_ctx = await create_security_agent()
+    suse_security_agent_sub = SubAgent(
+        name="suse-security-agent",
+        description="Agent specialized in managing SUSE Security resources. Use it to help with questions related to security, cve, sbom, vulnerabilities within Kubernetes clusters.",
+        agent=suse_security_agent
+    )
 
-    cookies = websocket.cookies
-    rancher_url = "https://"+websocket.url.hostname
-    if websocket.url.port:
-        rancher_url += ":"+str(websocket.url.port)
-
-    mcpUrl = os.environ.get("MCP_URL", "rancher-mcp-server.cattle-ai-agent-system.svc")
-    if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() == "true":
-        mcpUrl = "http://" + mcpUrl
-    else:
-        mcpUrl = "https://" + mcpUrl
-
-    async with streamablehttp_client(
-        url=mcpUrl,
-        headers={
-             "R_token":str(cookies.get("R_SESS")),
-             "R_url":rancher_url
-        }
-    ) as (read, write, _):
-        # This will create one mcp connection for each websocket connection. This is needed because we need to pass the rancher token in the header.
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            thread_id = str(uuid.uuid4())
-            tools = await load_mcp_tools(session)
+    math_agent_sub = SubAgent(
+            name="math-agent",
+            description="Agent that can help with math",
+            agent=create_math_agent()
+        )
+    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub, suse_mlm_agent_sub, suse_security_agent_sub],checkpointer=InMemorySaver())
+    thread_id = str(uuid.uuid4())
             
-            # if ENABLE_RAG is true, add the retriever tools to the tools list
-            if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-                tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+    config = {
+        "thread_id": thread_id,
+    }
+    if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
+        langfuse_handler = CallbackHandler()
+        config["callbacks"] = [langfuse_handler]
 
-            agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
+    while True:
+        try:
+            request = await websocket.receive_text()
             
-            config = {
-                "thread_id": thread_id,
-            }
-            if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
-                langfuse_handler = CallbackHandler()
-                config["callbacks"] = [langfuse_handler]
+            prompt, context = _parse_websocket_request(request)
+            if context:
+                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
+                for key, value in context.items():
+                    context_prompt += f"{key}:{value};"
+                prompt += context_prompt
 
-            while True:
-                try:
-                    request = await websocket.receive_text()
-                    
-                    prompt, context = _parse_websocket_request(request)
-                    if context:
-                        context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
-                        for key, value in context.items():
-                            context_prompt += f"{key}:{value};"
-                        prompt += context_prompt
-
-                    await stream_agent_response(
-                        agent=agent,
-                        input_data={"messages": [{"role": "user", "content": prompt}]},
-                        config=config,
-                        websocket=websocket)
-                except WebSocketDisconnect:
-                    logging.info(f"Client {websocket.client.host} disconnected.")
-                    break
-                except Exception as e:
-                    logging.error(f"An error occurred: {e}")
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
-                    else:
-                        break
-                finally:
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.send_text("</message>")
-            
+            await stream_agent_response(
+                agent=parent_agent,
+                input_data={"messages": [{"role": "user", "content": prompt}]},
+                config=config,
+                websocket=websocket)
+        except WebSocketDisconnect:
+            logging.info(f"Client {websocket.client.host} disconnected.")
+            break
+        except Exception as e:
+            logging.error(f"An error occurred: {e}")
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+            else:
+                break
+        finally:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_text("</message>")
+    
+    # Close MCP session and client after WebSocket loop ends
+    await session.__aexit__(None, None, None)
+    await client_ctx.__aexit__(None, None, None)
+    await obs_session.__aexit__(None, None, None)
+    await obs_client_ctx.__aexit__(None, None, None)
+    await mlm_session.__aexit__(None, None, None)
+    await mlm_client_ctx.__aexit__(None, None, None)
+    await sec_session.__aexit__(None, None, None)
+    await sec_client_ctx.__aexit__(None, None, None)
     logging.debug("ws connection closed")
 
 # This is the UI for testing. This will be replaced by the UI extension
 @app.get("/agent")
 async def get(request: Request):
     """Serves the main HTML page for the chat client."""
-    with open("src/index.html") as f:
+    with open("index.html") as f:
         html_content = f.read()
         modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
@@ -152,12 +275,36 @@ async def stream_agent_response(
     """
 
     await websocket.send_text("<message>")
-    async for event, data in agent.astream(
+    async for stream in agent.astream_events(
         input_data,
         config=config,
-        stream_mode=["updates", "messages", "custom"]
+        stream_mode=["updates", "messages", "custom", "events"],
+    
+
+        #include_names=["stream_event"]
+        #include_types=["stream_event", "llm", "node"]
     ):
-        if event == "messages":
+        print(f"elseaa: {stream}")
+        if stream["event"] == "on_chat_model_stream":
+            if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
+                # TODO filter by node! summary and subagent choice should not be sent to the user
+                await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
+        if stream["event"] == "on_custom_event":
+            await websocket.send_text(stream["data"])
+    
+        if stream["event"] == "on_chain_stream":
+            data = stream.get("data")
+            if isinstance(data, dict):
+                chunk = data.get("chunk")
+                if chunk and isinstance(chunk, (list, tuple)) and len(chunk) > 0 and chunk[0] == "updates":
+                    if len(chunk) > 1 and isinstance(chunk[1], dict):
+                        interrupts = chunk[1].get("__interrupt__", [])
+                        if interrupts and len(interrupts) > 0:
+                            interrupt_value = interrupts[0].value
+                            if interrupt_value:
+                                await websocket.send_text(interrupt_value)
+
+        """ if event == "messages":
             chunk, metadata = data
             if metadata.get("langgraph_node") == "agent" and chunk.content:
                 await websocket.send_text(_extract_text_from_chunk_content(chunk.content))
@@ -174,7 +321,7 @@ async def stream_agent_response(
                     websocket=websocket)
                 
         if event == "custom":
-            await websocket.send_text(data)
+            await websocket.send_text(data) """
     
 def get_llm_model(active_llm: str) -> str:
     """
