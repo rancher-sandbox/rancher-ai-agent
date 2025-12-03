@@ -75,16 +75,14 @@ async def create_rancher_agent():
     rancher_url = "https://raul-cabello.ngrok.app"
     mcpUrl = "http://localhost:9092"
 
-    # Create MCP client - it's an async generator so we get the context manager
     client_ctx = streamablehttp_client(
         url=mcpUrl,
         headers={
-             "R_token":"token-v8jrl:llpq6grqvh589dflj2hqjb8n67s54zxss64ls29x5gbvbcq9jhq5rc",
+             "R_token":"",
              "R_url":rancher_url
         }
     )
     
-    # Enter the context manager to get read/write streams
     read, write, _ = await client_ctx.__aenter__()
     
     # Initialize MCP session
@@ -101,6 +99,23 @@ async def create_rancher_agent():
     
     return agent, session, client_ctx  # Return all three for cleanup
 
+async def create_observability_agent():
+    client_ctx = streamablehttp_client(
+        url="http://localhost:9093",
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    agent = create_agent(init_config["llm"], tools)
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
 @app.websocket("/agent/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -112,17 +127,24 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logging.debug("ws connection opened")
     rancher_agent, session, client_ctx = await create_rancher_agent()
-    subagent = SubAgent(
+    rancher_agent_sub = SubAgent(
         name="rancher-agent",
         description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
         agent=rancher_agent
     )
+    suse_observability_agent, obs_session, obs_client_ctx = await create_observability_agent()
+    suse_observability_agent_sub = SubAgent(
+        name="suse-observability-agent",
+        description="Agent specialized in managing SUSE Observability resources. Use it to help with questions related to monitoring, metrics, logging, and tracing within Kubernetes clusters.",
+        agent=suse_observability_agent
+    )
+
     math_agent_sub = SubAgent(
-            name="MathAgent",
+            name="math-agent",
             description="Agent that can help with math",
             agent=create_math_agent()
         )
-    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[subagent, math_agent_sub],checkpointer=InMemorySaver())
+    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub],checkpointer=InMemorySaver())
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -164,13 +186,15 @@ async def websocket_endpoint(websocket: WebSocket):
     # Close MCP session and client after WebSocket loop ends
     await session.__aexit__(None, None, None)
     await client_ctx.__aexit__(None, None, None)
+    await obs_session.__aexit__(None, None, None)
+    await obs_client_ctx.__aexit__(None, None, None)
     logging.debug("ws connection closed")
 
 # This is the UI for testing. This will be replaced by the UI extension
 @app.get("/agent")
 async def get(request: Request):
     """Serves the main HTML page for the chat client."""
-    with open("index.html") as f:
+    with open("src/index.html") as f:
         html_content = f.read()
         modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
