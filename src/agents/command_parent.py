@@ -10,7 +10,6 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.config import get_stream_writer
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
@@ -19,7 +18,7 @@ from ollama import ResponseError
 from langgraph.types import Command
 from langgraph.checkpoint.memory import InMemorySaver
 from typing_extensions import TypedDict, Literal
-
+from langchain_core.callbacks.manager import dispatch_custom_event
 from dataclasses import dataclass
 
 @dataclass
@@ -83,7 +82,7 @@ class ParentAgentBuilder:
             Command object directing workflow to the selected subagent
         """
         messages = state["messages"]
-        
+
         # Build routing prompt with available subagents and their descriptions
         llm_route_prompt = "Based on the user request, decide which subagent is best suited to handle the user's request. Respond with only the name of the subagent.\n\n"
         llm_route_prompt += "Available subagents:\n"
@@ -93,7 +92,11 @@ class ParentAgentBuilder:
         
         # Use LLM to select the appropriate subagent
         subagent = self.llm.invoke(llm_route_prompt).content
-        print("LLM selected subagent:", subagent)
+
+        dispatch_custom_event(
+            "subagent_choice_event",
+            f"_DEBUG MESSAGE: Using {subagent}_ \n",
+        )
 
         # Return Command to navigate to the selected subagent
         return Command(

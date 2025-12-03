@@ -70,7 +70,7 @@ def create_math_agent() -> CompiledStateGraph:
 
     return create_agent(model=get_llm(), tools=[sum_two_numbers])
 
-async def create_rancher_agent():
+async def create_rancher_agent(websocket: WebSocket):
     rancher_url = "https://raul-cabello.ngrok.app"
     mcpUrl = "http://localhost:9092"
 
@@ -115,6 +115,24 @@ async def create_observability_agent():
     
     return agent, session, client_ctx  # Return all three for cleanup
 
+async def create_mlm_agent():
+    client_ctx = streamablehttp_client(
+        url="http://10.100.204.98:8000/mcp",
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    agent = create_agent(init_config["llm"], tools)
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
+
 async def create_security_agent():
     rancher_url = "https://10.144.102.193.sslip.io/"
     mcpUrl = "http://localhost:9092"
@@ -147,7 +165,8 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
     logging.debug("ws connection opened")
-    rancher_agent, session, client_ctx = await create_rancher_agent()
+    # TODO: don;t crash if one of the agents fails to create beacause MCP is down
+    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket)
     rancher_agent_sub = SubAgent(
         name="rancher-agent",
         description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
@@ -159,6 +178,12 @@ async def websocket_endpoint(websocket: WebSocket):
         description="Agent specialized in managing SUSE Observability resources. Use it to help with questions related to monitoring, metrics, logging, and tracing within Kubernetes clusters.",
         agent=suse_observability_agent
     )
+    suse_mlm_agent, mlm_session, mlm_client_ctx = await create_mlm_agent()
+    suse_mlm_agent_sub = SubAgent(
+        name="suse-mlm-agent",
+        description="Agent specialized in managing SUSE multilinux manager. Use it to help with questions related to system updates, linux systems.",
+        agent=suse_mlm_agent
+    )    
     suse_security_agent, sec_session, sec_client_ctx = await create_security_agent()
     suse_security_agent_sub = SubAgent(
         name="suse-security-agent",
@@ -171,7 +196,7 @@ async def websocket_endpoint(websocket: WebSocket):
             description="Agent that can help with math",
             agent=create_math_agent()
         )
-    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub, suse_security_agent_sub],checkpointer=InMemorySaver())
+    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub, suse_mlm_agent_sub, suse_security_agent_sub],checkpointer=InMemorySaver())
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -215,6 +240,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await client_ctx.__aexit__(None, None, None)
     await obs_session.__aexit__(None, None, None)
     await obs_client_ctx.__aexit__(None, None, None)
+    await mlm_session.__aexit__(None, None, None)
+    await mlm_client_ctx.__aexit__(None, None, None)
     await sec_session.__aexit__(None, None, None)
     await sec_client_ctx.__aexit__(None, None, None)
     logging.debug("ws connection closed")
@@ -247,16 +274,35 @@ async def stream_agent_response(
     """
 
     await websocket.send_text("<message>")
-    async for event in agent.astream_events(
+    async for stream in agent.astream_events(
         input_data,
         config=config,
-        stream_mode=["updates", "messages", "custom"]
+        stream_mode=["updates", "messages", "custom", "events"],
+    
+
+        #include_names=["stream_event"]
+        #include_types=["stream_event", "llm", "node"]
     ):
-        print(f"event: {event}")
-        if event["event"] == "on_chat_model_stream":
-            if event["data"]["chunk"].content:
+        print(f"elseaa: {stream}")
+        if stream["event"] == "on_chat_model_stream":
+            if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
                 # TODO filter by node! summary and subagent choice should not be sent to the user
-                await websocket.send_text(_extract_text_from_chunk_content(event["data"]["chunk"].content))
+                await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
+        if stream["event"] == "on_custom_event":
+            await websocket.send_text(stream["data"])
+    
+        if stream["event"] == "on_chain_stream":
+            data = stream.get("data")
+            if isinstance(data, dict):
+                chunk = data.get("chunk")
+                if chunk and isinstance(chunk, (list, tuple)) and len(chunk) > 0 and chunk[0] == "updates":
+                    if len(chunk) > 1 and isinstance(chunk[1], dict):
+                        interrupts = chunk[1].get("__interrupt__", [])
+                        if interrupts and len(interrupts) > 0:
+                            interrupt_value = interrupts[0].value
+                            if interrupt_value:
+                                await websocket.send_text(interrupt_value)
+
         """ if event == "messages":
             chunk, metadata = data
             if metadata.get("langgraph_node") == "agent" and chunk.content:
