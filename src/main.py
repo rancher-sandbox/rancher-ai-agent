@@ -26,7 +26,6 @@ from langchain.tools import tool
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 init_config = {}
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -116,6 +115,28 @@ async def create_observability_agent():
     
     return agent, session, client_ctx  # Return all three for cleanup
 
+async def create_security_agent():
+    rancher_url = "https://10.144.102.193.sslip.io/"
+    mcpUrl = "http://localhost:9092"
+
+    client_ctx = streamablehttp_client(
+        url=mcpUrl,
+        headers={
+             "R_token":"",
+             "R_url":rancher_url
+        }
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    agent = create_agent(init_config["llm"], tools)
+    return agent, session, client_ctx  # Return all three for cleanup
+
 @app.websocket("/agent/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -138,13 +159,19 @@ async def websocket_endpoint(websocket: WebSocket):
         description="Agent specialized in managing SUSE Observability resources. Use it to help with questions related to monitoring, metrics, logging, and tracing within Kubernetes clusters.",
         agent=suse_observability_agent
     )
+    suse_security_agent, sec_session, sec_client_ctx = await create_security_agent()
+    suse_security_agent_sub = SubAgent(
+        name="suse-security-agent",
+        description="Agent specialized in managing SUSE Security resources. Use it to help with questions related to security, cve, sbom, vulnerabilities within Kubernetes clusters.",
+        agent=suse_security_agent
+    )
 
     math_agent_sub = SubAgent(
             name="math-agent",
             description="Agent that can help with math",
             agent=create_math_agent()
         )
-    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub],checkpointer=InMemorySaver())
+    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub, suse_security_agent_sub],checkpointer=InMemorySaver())
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -188,6 +215,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await client_ctx.__aexit__(None, None, None)
     await obs_session.__aexit__(None, None, None)
     await obs_client_ctx.__aexit__(None, None, None)
+    await sec_session.__aexit__(None, None, None)
+    await sec_client_ctx.__aexit__(None, None, None)
     logging.debug("ws connection closed")
 
 # This is the UI for testing. This will be replaced by the UI extension
