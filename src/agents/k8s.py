@@ -7,12 +7,12 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.config import get_stream_writer
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
+from langchain_core.callbacks.manager import dispatch_custom_event
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
@@ -311,14 +311,15 @@ def _process_tool_result(tool_result: str) -> str:
     try:
         json_result = json.loads(tool_result)
         if "uiContext" in json_result:
-            writer = get_stream_writer()
-            if writer:
-                writer(f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
+            dispatch_custom_event(
+            "ui_context",
+            f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
         if "docLinks" in json_result:
-            writer = get_stream_writer()
             for link in json_result['docLinks']:
-                writer(f"<mcp-doclink>{link}</mcp-doclink>")
-        
+                dispatch_custom_event(
+                "dock_link",
+                f"<mcp-doclink>{link}</mcp-doclink>")
+
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
     except json.JSONDecodeError:
