@@ -318,7 +318,7 @@ def _process_tool_result(tool_result: str) -> str:
         
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         # If it's not a valid JSON, return the raw string result
         return tool_result
 
