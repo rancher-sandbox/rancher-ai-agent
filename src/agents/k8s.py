@@ -302,11 +302,17 @@ def _handle_interrupt(tool_call: dict) -> bool:
           
     return True 
 
-def _process_tool_result(tool_result: str) -> str:
+def _process_tool_result(tool_result: str | list) -> str:
     """Processes the raw tool result, handling JSON and streaming UI context if necessary.
-       MCP returns examaple: {"uiContext":{}, "llm": {}}"""
+       MCP returns example: {"uiContext":{}, "llm": {}}"""
     try:
+        # Handle list format: [{"type": "text", "text": "tool response", "id": "..."}]
+        if isinstance(tool_result, list) and len(tool_result) > 0:
+            if isinstance(tool_result[0], dict) and "text" in tool_result[0]:
+                tool_result = tool_result[0]["text"]
+
         json_result = json.loads(tool_result)
+
         if "uiContext" in json_result:
             writer = get_stream_writer()
             if writer:
@@ -318,7 +324,7 @@ def _process_tool_result(tool_result: str) -> str:
         
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         # If it's not a valid JSON, return the raw string result
         return tool_result
 
