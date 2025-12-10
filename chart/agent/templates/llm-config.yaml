@@ -17,3 +17,7 @@ stringData:
   LANGFUSE_HOST: "{{ .Values.langfuseHost }}"
   LANGFUSE_PUBLIC_KEY: "{{ .Values.langfusePublicKey }}"
   LANGFUSE_SECRET_KEY: "{{ .Values.langfuseSecretKey }}"
+  AWS_REGION: "{{ .Values.awsBedrock.region }}"
+  AWS_BEARER_TOKEN_BEDROCK: "{{ .Values.awsBedrock.bearerToken }}"
+  AWS_SECRET_ACCESS_KEY: "{{ .Values.awsBedrock.secretAccessKey }}"
+  AWS_ACCESS_KEY_ID: "{{ .Values.awsBedrock.accessKeyId }}"

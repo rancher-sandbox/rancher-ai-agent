@@ -20,6 +20,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.language_models.llms import BaseLanguageModel
 from contextlib import asynccontextmanager
 from langfuse.langchain import CallbackHandler
+from langchain_aws import ChatBedrockConverse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -127,7 +128,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/agent")
 async def get(request: Request):
     """Serves the main HTML page for the chat client."""
-    with open("index.html") as f:
+    with open("src/index.html") as f:
         html_content = f.read()
         modified_html = html_content.replace("{{ url }}", request.url.hostname)
 
@@ -196,6 +197,7 @@ def get_llm() -> BaseLanguageModel:
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     openai_url = os.environ.get("OPENAI_URL")
+    aws_region = os.environ.get("AWS_REGION")
 
     if active == "ollama":
         return ChatOllama(model=model, base_url=ollama_url)
@@ -206,6 +208,8 @@ def get_llm() -> BaseLanguageModel:
             return ChatOpenAI(model=model, base_url=openai_url)
         else:
             return ChatOpenAI(model=model)
+    if active == "bedrock":
+        return ChatBedrockConverse(model=model)
 
     # default order if active is not specified
     if ollama_url:
@@ -217,6 +221,8 @@ def get_llm() -> BaseLanguageModel:
             return ChatOpenAI(model=model, base_url=openai_url)
         else:
             return ChatOpenAI(model=model)
+    if aws_region:
+        return ChatBedrockConverse(model=model)
 
     raise ValueError("LLM not configured.")
 
