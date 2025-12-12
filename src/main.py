@@ -176,6 +176,30 @@ async def stream_agent_response(
         if event == "custom":
             await websocket.send_text(data)
     
+def get_llm_model(active_llm: str) -> str:
+    """
+    Retrieves the model name from environment variables.
+    If an active LLM is specified, it looks for the corresponding model variable, otherwise it falls back to a general MODEL variable.
+    
+    Args:
+        active_llm: The active LLM identifier, one of 'ollama', 'gemini', 'openai', 'bedrock'.
+
+    Returns:
+        The model name as a string.
+    """
+
+    model = None
+
+    if active_llm:
+        model = os.environ.get(f"{active_llm.upper()}_MODEL")
+
+    if not model:
+        model = os.environ.get("MODEL")
+
+    if not model:
+        raise ValueError("LLM Model not configured.")
+
+    return model
 
 def get_llm() -> BaseLanguageModel:
     """
@@ -188,11 +212,12 @@ def get_llm() -> BaseLanguageModel:
         ValueError: If no supported model or API key is configured.
     """
 
-    model = os.environ.get("MODEL")
-    if not model:
-        raise ValueError("LLM Model not configured.")
-    
     active = os.environ.get("ACTIVE_LLM", "")
+    if active and active not in ["ollama", "gemini", "openai", "bedrock"]:
+        raise ValueError("Unsupported Active LLM specified.")
+
+    model = get_llm_model(active)
+    
     ollama_url = os.environ.get("OLLAMA_URL")
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")

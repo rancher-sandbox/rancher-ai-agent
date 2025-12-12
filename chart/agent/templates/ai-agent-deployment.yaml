@@ -56,6 +56,30 @@ spec:
                 name: llm-config
                 key: MODEL
                 optional: true
+          - name: OLLAMA_MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: OLLAMA_MODEL
+                optional: true
+          - name: GEMINI_MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: GEMINI_MODEL
+                optional: true
+          - name: OPENAI_MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: OPENAI_MODEL
+                optional: true
+          - name: BEDROCK_MODEL
+            valueFrom:
+              secretKeyRef:
+                name: llm-config
+                key: BEDROCK_MODEL
+                optional: true
           - name: OLLAMA_URL
             valueFrom:
               secretKeyRef:

@@ -59,12 +59,17 @@ def test_get_llm_openai(mock_openai):
 
 def test_get_llm_no_model():
     with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(ValueError, match="Model not configured."):
+        with pytest.raises(ValueError, match="LLM Model not configured."):
             get_llm()
 
 def test_get_llm_no_provider():
     with patch.dict(os.environ, {"MODEL": "some-model"}, clear=True):
         with pytest.raises(ValueError, match="LLM not configured."):
+            get_llm()
+        
+def test_get_llm_invalid_active_model():
+    with patch.dict(os.environ, {"MODEL": "some-model", "ACTIVE_LLM": "invalid-llm"}, clear=True):
+        with pytest.raises(ValueError, match="Unsupported Active LLM specified."):
             get_llm()
 
 @pytest.fixture

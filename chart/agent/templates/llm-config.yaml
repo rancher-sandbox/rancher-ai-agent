@@ -9,6 +9,10 @@ stringData:
   OPENAI_URL: "{{ .Values.openaiUrl }}"
   SYSTEM_PROMPT: {{ .Values.systemPrompt | quote }}
   MODEL: "{{ .Values.llmModel }}"
+  OLLAMA_MODEL: "{{ .Values.ollamaLlmModel }}"
+  GEMINI_MODEL: "{{ .Values.geminiLlmModel }}"
+  OPENAI_MODEL: "{{ .Values.openaiLlmModel }}"
+  BEDROCK_MODEL: "{{ .Values.bedrockLlmModel }}"
   OLLAMA_URL: "{{ .Values.ollamaUrl }}"
   GOOGLE_API_KEY: "{{ .Values.googleApiKey }}"
   ACTIVE_LLM: "{{ .Values.activeLlm }}"
