@@ -4,6 +4,7 @@ import json
 import uuid
 import certifi
 
+from dataclasses import dataclass
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from starlette.websockets import WebSocketState
 from fastapi.responses import HTMLResponse
@@ -23,6 +24,13 @@ from langfuse.langchain import CallbackHandler
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_aws import ChatBedrockConverse
+
+@dataclass
+class WebSocketRequest:
+    """Represents a parsed WebSocket request from the client."""
+    prompt: str
+    context: dict
+    agent: str = ""
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -173,31 +181,12 @@ async def websocket_endpoint(websocket: WebSocket):
         description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
         agent=rancher_agent
     )
-    suse_observability_agent, obs_session, obs_client_ctx = await create_observability_agent()
-    suse_observability_agent_sub = SubAgent(
-        name="suse-observability-agent",
-        description="Agent specialized in managing SUSE Observability resources. Use it to help with questions related to monitoring, metrics, logging, and tracing within Kubernetes clusters.",
-        agent=suse_observability_agent
-    )
-    suse_mlm_agent, mlm_session, mlm_client_ctx = await create_mlm_agent()
-    suse_mlm_agent_sub = SubAgent(
-        name="suse-mlm-agent",
-        description="Agent specialized in managing SUSE multilinux manager. Use it to help with questions related to system updates, linux systems.",
-        agent=suse_mlm_agent
-    )    
-    suse_security_agent, sec_session, sec_client_ctx = await create_security_agent()
-    suse_security_agent_sub = SubAgent(
-        name="suse-security-agent",
-        description="Agent specialized in managing SUSE Security resources. Use it to help with questions related to security, cve, sbom, vulnerabilities within Kubernetes clusters.",
-        agent=suse_security_agent
-    )
-
     math_agent_sub = SubAgent(
             name="math-agent",
             description="Agent that can help with math",
             agent=create_math_agent()
         )
-    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub, suse_observability_agent_sub, suse_mlm_agent_sub, suse_security_agent_sub],checkpointer=InMemorySaver())
+    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -211,16 +200,20 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             request = await websocket.receive_text()
             
-            prompt, context = _parse_websocket_request(request)
-            if context:
-                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user’s request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
-                for key, value in context.items():
+            ws_request = _parse_websocket_request(request)
+            if ws_request.context:
+                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
+                for key, value in ws_request.context.items():
                     context_prompt += f"{key}:{value};"
-                prompt += context_prompt
+                ws_request.prompt += context_prompt
+            if ws_request.agent:
+                config["agent"] = ws_request.agent
+            else:
+                config["agent"] = ""
 
             await stream_agent_response(
                 agent=parent_agent,
-                input_data={"messages": [{"role": "user", "content": prompt}]},
+                input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
                 config=config,
                 websocket=websocket)
         except WebSocketDisconnect:
@@ -239,12 +232,12 @@ async def websocket_endpoint(websocket: WebSocket):
     # Close MCP session and client after WebSocket loop ends
     await session.__aexit__(None, None, None)
     await client_ctx.__aexit__(None, None, None)
-    await obs_session.__aexit__(None, None, None)
+    """ await obs_session.__aexit__(None, None, None)
     await obs_client_ctx.__aexit__(None, None, None)
     await mlm_session.__aexit__(None, None, None)
     await mlm_client_ctx.__aexit__(None, None, None)
     await sec_session.__aexit__(None, None, None)
-    await sec_client_ctx.__aexit__(None, None, None)
+    await sec_client_ctx.__aexit__(None, None, None) """
     logging.debug("ws connection closed")
 
 # This is the UI for testing. This will be replaced by the UI extension
@@ -511,27 +504,28 @@ def _extract_text_from_chunk_content(chunk_content: any) -> str:
     
     return str(chunk_content) if chunk_content is not None else ""
 
-def _parse_websocket_request(request: str) -> tuple[str, dict]:
+def _parse_websocket_request(request: str) -> WebSocketRequest:
     """
     Parses the incoming websocket request.
 
-    The request can be a JSON string with 'prompt' and 'context' keys,
+    The request can be a JSON string with 'prompt', 'context', and 'agent' keys,
     or a plain text string.
 
     Args:
         request: The raw request string from the websocket.
 
     Returns:
-        A tuple containing the prompt (str) and the context (dict).
+        A WebSocketRequest object containing the parsed data.
     """
     try:
         json_request = json.loads(request)
-        prompt = json_request.get("prompt", "")
-        context = json_request.get("context", {})
-        
-        return prompt, context
+        return WebSocketRequest(
+            prompt=json_request.get("prompt", ""),
+            context=json_request.get("context", {}),
+            agent=json_request.get("agent", "")
+        )
     except json.JSONDecodeError:
-        return request, {}
+        return WebSocketRequest(prompt=request, context={}, agent="")
 
 # This will be removed once https://github.com/modelcontextprotocol/python-sdk/pull/1177 is merged
 class SimpleTruststore:
