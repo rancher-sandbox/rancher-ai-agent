@@ -5,6 +5,7 @@ This module provides a parent agent that uses an LLM to intelligently route user
 to the most appropriate specialized subagent based on the request content.
 """
 
+import logging
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -81,6 +82,16 @@ class ParentAgentBuilder:
         Returns:
             Command object directing workflow to the selected subagent
         """
+
+        # UI override to force a specific subagent
+        agent_override = config.get("configurable", {}).get("agent", "")
+        if agent_override:
+            dispatch_custom_event(
+                "subagent_choice_event",
+                f"_DEBUG MESSAGE: Using UI-specified agent: {agent_override}_ \n",
+            )
+            return Command(goto=agent_override)
+        
         messages = state["messages"]
 
         # Build routing prompt with available subagents and their descriptions
@@ -95,13 +106,64 @@ class ParentAgentBuilder:
 
         dispatch_custom_event(
             "subagent_choice_event",
-            f"_DEBUG MESSAGE: Using {subagent}_ \n",
+            f"_DEBUG MESSAGE: LLM selected: {subagent}_ \n",
         )
 
         # Return Command to navigate to the selected subagent
-        return Command(
-            goto=subagent,
-        )
+        return Command(goto=subagent)
+    
+    def should_summarize_conversation(self, state: AgentState):
+        """
+        Determines the next step in the agent's workflow.
+
+        This conditional edge checks the last message in the state to decide whether to
+        continue with a tool call, summarize the conversation, or end the execution.
+
+        Args:
+            state: The current state of the agent.
+
+        Returns:
+            A string indicating the next node to transition to: "continue",
+            "summarize_conversation", or "end"."""
+        messages = state["messages"]
+        last_message = messages[-1]
+        if not last_message.tool_calls:
+            if len(messages) > 7: ## TODO check tokens not len messages!
+                return "summarize_conversation"
+            return "end"
+        else:
+            return "continue"
+        
+    def summarize_conversation_node(self, state: AgentState):
+        """
+        Summarizes the conversation history.
+
+        This node is invoked when the conversation becomes too long. It asks the LLM
+        to create or extend a summary of the conversation, then replaces the
+        previous messages with the new summary to keep the context concise.
+
+        Args:
+            state: The current state of the agent, containing messages and an optional summary.
+
+        Returns:
+            A dictionary with the updated summary and a condensed list of messages."""
+        summary = state.get("summary", "")
+        if summary:
+            summary_message = (
+                f"This is summary of the conversation to date: {summary}\n"
+                "Extend the summary by taking into account the new messages above:" )
+        else:
+            summary_message = "Create a summary of the conversation above:"
+
+        messages = state["messages"] + [HumanMessage(content=summary_message)]
+        response = self.llm.invoke(messages)
+        new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
+        new_messages = new_messages + [response]
+
+        logging.debug("summarizing conversation")
+        
+        return {"summary": response.content, "messages": new_messages}
+
 
     def build(self) -> CompiledStateGraph:
         """
@@ -115,12 +177,21 @@ class ParentAgentBuilder:
         """
         workflow = StateGraph(AgentState)
         
-        # Add routing node as entry point
         workflow.add_node("choose_subagent", self.choose_subagent)
-        
+        workflow.add_node("summarize_conversation", self.summarize_conversation_node)
+
         # Add a node for each subagent
         for sa in self.subagents:
             workflow.add_node(sa.name, sa.agent)
+            workflow.add_conditional_edges(
+            sa.name,
+            self.should_summarize_conversation,
+            {
+                "summarize_conversation": "summarize_conversation",
+                "end": END,
+            },
+        )
+
         
         # Set the routing node as the entry point
         workflow.set_entry_point("choose_subagent")

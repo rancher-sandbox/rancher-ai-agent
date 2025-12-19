@@ -20,7 +20,7 @@
         </form>
         <script>
             // Establish a WebSocket connection
-            const ws = new WebSocket("wss://{{ url }}/api/v1/namespaces/cattle-ai-agent-system/services/http:rancher-ai-agent:80/proxy/agent/ws");
+            const ws = new WebSocket("ws://localhost:8000/agent/ws");
             ws.onopen = function(event) {
                 console.log("WebSocket connection established.");
                 const li = document.createElement('li');
