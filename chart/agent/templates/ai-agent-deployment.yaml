@@ -162,6 +162,10 @@ spec:
             value: "{{ .Values.log.level }}"
           - name: INSECURE_SKIP_TLS
             value: "{{ .Values.insecureSkipTls }}"
+          - name: LLM_MOCK_ENABLED
+            value: "{{ .Values.llmMock.enabled }}"
+          - name: LLM_MOCK_URL
+            value: "{{ .Values.llmMock.url }}"
         ports:
          - containerPort: 8000
         {{- if or (not .Values.insecureSkipTls) .Values.rag.pvc }}
