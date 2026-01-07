@@ -8,27 +8,6 @@ from .routers import websocket, ui
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
-        logging.getLogger().setLevel(LOG_LEVEL)
-        """ logging.info(f"Using model: {init_config['llm']}")
-        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-            init_rag_retriever() """
-        if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
-            SimpleTruststore().set_truststore()
-    except ValueError as e:
-        logging.critical(e)
-        raise e
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-app.include_router(websocket.router)
-if os.environ.get("ENABLE_TEST_UI", "").lower() == "true":
-    app.include_router(ui.router)
-
 # This will be removed once https://github.com/modelcontextprotocol/python-sdk/pull/1177 is merged
 class SimpleTruststore:
     def get_default(self):
@@ -59,3 +38,25 @@ class SimpleTruststore:
             company_cert_path=company_cert_path, output_path=output_path
         )
         self.use_truststore(truststore_path=truststore_path)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+        logging.getLogger().setLevel(LOG_LEVEL)
+        """ logging.info(f"Using model: {init_config['llm']}")
+        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+            init_rag_retriever() """
+        if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
+            SimpleTruststore().set_truststore()
+    except ValueError as e:
+        logging.critical(e)
+        raise e
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
+app.include_router(websocket.router)
+
+if os.environ.get("ENABLE_TEST_UI", "").lower() == "true":
+    app.include_router(ui.router)

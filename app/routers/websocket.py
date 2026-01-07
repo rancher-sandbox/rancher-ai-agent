@@ -4,19 +4,13 @@ import logging
 import json
 
 from ..dependencies import get_llm
+from ..services.agent.agent import create_agent
 from dataclasses import dataclass
 from fastapi import APIRouter
 from fastapi import  WebSocket, WebSocketDisconnect, Depends
 from starlette.websockets import WebSocketState
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-from langgraph.checkpoint.memory import InMemorySaver
-from langchain_mcp_adapters.tools import load_mcp_tools
-from ..agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever, create_parent_agent, SubAgent
 from langgraph.graph.state import CompiledStateGraph
 from langfuse.langchain import CallbackHandler
-from langchain.agents import create_agent
-from langchain.tools import tool
 from langchain_core.language_models.llms import BaseLanguageModel
 
 router = APIRouter()
@@ -28,58 +22,6 @@ class WebSocketRequest:
     context: dict
     agent: str = ""
 
-def create_math_agent() -> CompiledStateGraph:
-    """
-    Creates a simple math agent that can sum two numbers.
-    
-    Returns:
-        A compiled LangGraph agent capable of summing two numbers.
-    """
-    @tool
-    def sum_two_numbers(a: int, b: int) -> int:
-        """Sum two numbers together.
-        
-        Args:
-            a: The first number to sum
-            b: The second number to sum
-        
-        Returns:
-            The sum of a and b
-        """
-        print("Summing", a, "and", b)
-        return a + b
-
-
-    return create_agent(model=get_llm(), tools=[sum_two_numbers])
-
-async def create_rancher_agent(websocket: WebSocket, llm: BaseLanguageModel) -> tuple[CompiledStateGraph, ClientSession, any]:
-    rancher_url = "https://raul-cabello.ngrok.app"
-    mcpUrl = "http://localhost:9092"
-
-    client_ctx = streamablehttp_client(
-        url=mcpUrl,
-        headers={
-             "R_token":"",
-             "R_url":rancher_url
-        }
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    
-    # if ENABLE_RAG is true, add the retriever tools to the tools list
-    if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
-
-    agent = create_k8s_agent(llm, tools, get_system_prompt(), InMemorySaver())
-    
-    return agent, session, client_ctx  # Return all three for cleanup
-
 @router.websocket("/agent/ws")
 async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depends(get_llm)):
     """
@@ -90,19 +32,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     """
     await websocket.accept()
     logging.debug("ws connection opened")
-    # TODO: don;t crash if one of the agents fails to create beacause MCP is down
-    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket, llm=llm)
-    rancher_agent_sub = SubAgent(
-        name="rancher-agent",
-        description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
-        agent=rancher_agent
-    )
-    math_agent_sub = SubAgent(
-            name="math-agent",
-            description="Agent that can help with math",
-            agent=create_math_agent()
-        )
-    parent_agent = create_parent_agent(llm=llm,subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
+    agent, session, client_ctx = await create_agent(llm=llm)
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -128,7 +58,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
                 config["agent"] = ""
 
             await stream_agent_response(
-                agent=parent_agent,
+                agent=agent,
                 input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
                 config=config,
                 websocket=websocket)
@@ -178,10 +108,6 @@ async def stream_agent_response(
         input_data,
         config=config,
         stream_mode=["updates", "messages", "custom", "events"],
-    
-
-        #include_names=["stream_event"]
-        #include_types=["stream_event", "llm", "node"]
     ):
         if stream["event"] == "on_chat_model_stream":
             if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
@@ -201,25 +127,6 @@ async def stream_agent_response(
                             interrupt_value = interrupts[0].value
                             if interrupt_value:
                                 await websocket.send_text(interrupt_value)
-
-        """ if event == "messages":
-            chunk, metadata = data
-            if metadata.get("langgraph_node") == "agent" and chunk.content:
-                await websocket.send_text(_extract_text_from_chunk_content(chunk.content))
-
-        if event == "updates":
-            if interrupt_value := data.get("__interrupt__"):
-                await websocket.send_text(interrupt_value[0].value)
-                # Receive user response for the human verification
-                user_response = await websocket.receive_text()
-                await stream_agent_response(
-                    agent=agent,
-                    input_data=Command(resume={"response": user_response}),
-                    config=config,
-                    websocket=websocket)
-                
-        if event == "custom":
-            await websocket.send_text(data) """
     
 def get_llm_model(active_llm: str) -> str:
     """

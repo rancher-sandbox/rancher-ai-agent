@@ -16,15 +16,15 @@ from langchain_core.callbacks.manager import dispatch_custom_event
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
-class AgentState(TypedDict):
+class ChildAgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
-class K8sAgentBuilder:
+class ChildAgentBuilder:
     def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
         """
-        Initializes the K8sAgentBuilder.
+        Initializes the AgentBuilder.
 
         Args:
             llm: The language model to use for the agent's decisions.
@@ -39,7 +39,7 @@ class K8sAgentBuilder:
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.tools_by_name = {tool.name: tool for tool in self.tools}
     
-    def summarize_conversation_node(self, state: AgentState):
+    def summarize_conversation_node(self, state: ChildAgentState):
         """
         Summarizes the conversation history.
 
@@ -85,7 +85,7 @@ class K8sAgentBuilder:
                     continue
                 raise e
 
-    def call_model_node(self, state: AgentState, config: RunnableConfig):
+    def call_model_node(self, state: ChildAgentState, config: RunnableConfig):
         """
         Invokes the language model with the current state and context.
 
@@ -110,7 +110,7 @@ class K8sAgentBuilder:
 
         return {"messages": [response]}
 
-    async def tool_node(self, state: AgentState):
+    async def tool_node(self, state: ChildAgentState):
         """
         Executes tools based on the LLM's request.
 
@@ -153,7 +153,7 @@ class K8sAgentBuilder:
 
         return {"messages": outputs}
     
-    def should_summarize_conversation(self, state: AgentState):
+    def should_summarize_conversation(self, state: ChildAgentState):
         """
         Determines the next step in the agent's workflow.
 
@@ -175,7 +175,7 @@ class K8sAgentBuilder:
         else:
             return "continue"
         
-    def should_continue_after_interrupt(self, state: AgentState):
+    def should_continue_after_interrupt(self, state: ChildAgentState):
         messages = state["messages"]
         last_message = messages[-1]
         if isinstance(last_message, ToolMessage) and last_message.content == INTERRUPT_CANCEL_MESSAGE:
@@ -191,7 +191,7 @@ class K8sAgentBuilder:
         Returns:
             A compiled LangGraph StateGraph ready to be invoked.
         """
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(ChildAgentState)
         workflow.add_node("agent", self.call_model_node)
         workflow.add_node("tools", self.tool_node)
         workflow.add_node("summarize_conversation", self.summarize_conversation_node)
@@ -217,11 +217,11 @@ class K8sAgentBuilder:
 
         return workflow.compile(checkpointer=self.checkpointer)
 
-def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
+def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
     """
     Creates a LangGraph agent capable of interacting with Rancher and Kubernetes resources.
     
-    This factory function instantiates the K8sAgentBuilder, builds the agent graph,
+    This factory function instantiates the AgentBuilder, builds the agent graph,
     and returns the compiled agent.
     
     Args:
@@ -232,7 +232,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-    builder = K8sAgentBuilder(llm, tools, system_prompt, checkpointer)
+    builder = ChildAgentBuilder(llm, tools, system_prompt, checkpointer)
 
     return builder.build()
 
