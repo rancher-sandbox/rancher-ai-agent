@@ -1,29 +1,25 @@
-import logging
 import os
-import json
 import uuid
-import certifi
+import logging
+import json
 
+from ..dependencies import get_llm
 from dataclasses import dataclass
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter
+from fastapi import  WebSocket, WebSocketDisconnect, Depends
 from starlette.websockets import WebSocketState
-from fastapi.responses import HTMLResponse
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from langgraph.checkpoint.memory import InMemorySaver
-from langchain_ollama import ChatOllama 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from .agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever, create_parent_agent, SubAgent
-from langchain_google_genai import ChatGoogleGenerativeAI
+from ..agents import create_k8s_agent, fleet_documentation_retriever, init_rag_retriever, rancher_documentation_retriever, create_parent_agent, SubAgent
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Command
-from langchain_openai import ChatOpenAI
-from langchain_core.language_models.llms import BaseLanguageModel
-from contextlib import asynccontextmanager
 from langfuse.langchain import CallbackHandler
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langchain_aws import ChatBedrockConverse
+from langchain_core.language_models.llms import BaseLanguageModel
+
+router = APIRouter()
 
 @dataclass
 class WebSocketRequest:
@@ -31,29 +27,6 @@ class WebSocketRequest:
     prompt: str
     context: dict
     agent: str = ""
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-init_config = {}
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
-        logging.getLogger().setLevel(LOG_LEVEL)
-        init_config["llm"] = get_llm()
-        logging.info(f"Using model: {init_config['llm']}")
-        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-            init_rag_retriever()
-        if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
-            SimpleTruststore().set_truststore()
-    except ValueError as e:
-        logging.critical(e)
-        raise e
-    yield
-    init_config.clear()
-
-app = FastAPI(lifespan=lifespan)
-
 
 def create_math_agent() -> CompiledStateGraph:
     """
@@ -79,7 +52,7 @@ def create_math_agent() -> CompiledStateGraph:
 
     return create_agent(model=get_llm(), tools=[sum_two_numbers])
 
-async def create_rancher_agent(websocket: WebSocket):
+async def create_rancher_agent(websocket: WebSocket, llm: BaseLanguageModel) -> tuple[CompiledStateGraph, ClientSession, any]:
     rancher_url = "https://raul-cabello.ngrok.app"
     mcpUrl = "http://localhost:9092"
 
@@ -103,69 +76,12 @@ async def create_rancher_agent(websocket: WebSocket):
     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
         tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
 
-    agent = create_k8s_agent(init_config["llm"], tools, get_system_prompt(), InMemorySaver())
+    agent = create_k8s_agent(llm, tools, get_system_prompt(), InMemorySaver())
     
     return agent, session, client_ctx  # Return all three for cleanup
 
-async def create_observability_agent():
-    client_ctx = streamablehttp_client(
-        url="http://localhost:9093",
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    
-    agent = create_agent(init_config["llm"], tools)
-    
-    return agent, session, client_ctx  # Return all three for cleanup
-
-async def create_mlm_agent():
-    client_ctx = streamablehttp_client(
-        url="http://10.100.204.98:8000/mcp",
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    
-    agent = create_agent(init_config["llm"], tools)
-    
-    return agent, session, client_ctx  # Return all three for cleanup
-
-
-async def create_security_agent():
-    rancher_url = "https://10.144.102.193.sslip.io/"
-    mcpUrl = "http://localhost:9092"
-
-    client_ctx = streamablehttp_client(
-        url=mcpUrl,
-        headers={
-             "R_token":"",
-             "R_url":rancher_url
-        }
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    agent = create_agent(init_config["llm"], tools)
-    return agent, session, client_ctx  # Return all three for cleanup
-
-@app.websocket("/agent/ws")
-async def websocket_endpoint(websocket: WebSocket):
+@router.websocket("/agent/ws")
+async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depends(get_llm)):
     """
     WebSocket endpoint for the agent.
     
@@ -175,7 +91,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logging.debug("ws connection opened")
     # TODO: don;t crash if one of the agents fails to create beacause MCP is down
-    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket)
+    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket, llm=llm)
     rancher_agent_sub = SubAgent(
         name="rancher-agent",
         description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
@@ -186,7 +102,7 @@ async def websocket_endpoint(websocket: WebSocket):
             description="Agent that can help with math",
             agent=create_math_agent()
         )
-    parent_agent = create_parent_agent(llm=init_config["llm"],subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
+    parent_agent = create_parent_agent(llm=llm,subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -240,16 +156,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await sec_client_ctx.__aexit__(None, None, None) """
     logging.debug("ws connection closed")
 
-# This is the UI for testing. This will be replaced by the UI extension
-@app.get("/agent")
-async def get(request: Request):
-    """Serves the main HTML page for the chat client."""
-    with open("index.html") as f:
-        html_content = f.read()
-        modified_html = html_content.replace("{{ url }}", request.url.hostname)
-
-    return HTMLResponse(modified_html)
-
 async def stream_agent_response(
     agent: CompiledStateGraph,
     input_data: dict[str, list[dict[str, str]]],
@@ -277,7 +183,6 @@ async def stream_agent_response(
         #include_names=["stream_event"]
         #include_types=["stream_event", "llm", "node"]
     ):
-        print(f"elseaa: {stream}")
         if stream["event"] == "on_chat_model_stream":
             if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
                 # TODO filter by node! summary and subagent choice should not be sent to the user
@@ -526,34 +431,3 @@ def _parse_websocket_request(request: str) -> WebSocketRequest:
         )
     except json.JSONDecodeError:
         return WebSocketRequest(prompt=request, context={}, agent="")
-
-# This will be removed once https://github.com/modelcontextprotocol/python-sdk/pull/1177 is merged
-class SimpleTruststore:
-    def get_default(self):
-        """Get the default Python truststore"""
-        return certifi.where()
-
-    def create_combined(self, company_cert_path, output_path):
-        """Create truststore with public CAs + company cert"""
-        with open(output_path, "w") as combined:
-            # Add public CAs 
-            with open(certifi.where(), "r") as public_cas:
-                combined.write(public_cas.read())
-
-            # Add MCP self-signed cert
-            with open(company_cert_path, "r") as company:
-                combined.write("\n" + company.read())
-
-        return output_path
-    
-    def use_truststore(self, truststore_path):
-        """Set the global truststore"""
-        os.environ["SSL_CERT_FILE"] = truststore_path
-
-    def set_truststore(self):
-        company_cert_path = "/etc/tls/tls.crt"
-        output_path = "/combined.crt"
-        truststore_path = self.create_combined(
-            company_cert_path=company_cert_path, output_path=output_path
-        )
-        self.use_truststore(truststore_path=truststore_path)
