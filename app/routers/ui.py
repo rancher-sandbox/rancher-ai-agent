@@ -7,7 +7,7 @@ router = APIRouter()
 @router.get("/agent")
 async def get(request: Request):
     """Serves the main HTML page for the chat client."""
-    with open("app/index.html") as f:
+    with open("app/routers/testui.html") as f:
         html_content = f.read()
         modified_html = html_content.replace("{{ url }}", request.url.hostname)
 

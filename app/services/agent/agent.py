@@ -11,96 +11,7 @@ from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_core.language_models.llms import BaseLanguageModel
 
-
-async def create_agent(llm: BaseLanguageModel) -> tuple[CompiledStateGraph, ClientSession, any]:
-    """ 
-    TODO check agents and create parent if needed!
-    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket, llm=llm)
-    rancher_agent_sub = ChildAgent(
-        name="rancher-agent",
-        description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
-        agent=rancher_agent
-    )
-    math_agent_sub = ChildAgent(
-            name="math-agent",
-            description="Agent that can help with math",
-            agent=create_math_agent()
-        )
-    parent_agent = create_parent_agent(llm=llm,subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
-    
-    return parent_agent
- """
-    return await _create_rancher_agent(llm=llm)
-
-def _create_math_agent(llm: BaseLanguageModel) -> CompiledStateGraph:
-    """
-    Creates a simple math agent that can sum two numbers.
-    
-    Returns:
-        A compiled LangGraph agent capable of summing two numbers.
-    """
-    @tool
-    def sum_two_numbers(a: int, b: int) -> int:
-        """Sum two numbers together.
-        
-        Args:
-            a: The first number to sum
-            b: The second number to sum
-        
-        Returns:
-            The sum of a and b
-        """
-        print("Summing", a, "and", b)
-        return a + b
-
-
-    return create_agent(model=llm, tools=[sum_two_numbers])
-
-async def _create_rancher_agent(llm: BaseLanguageModel) -> tuple[CompiledStateGraph, ClientSession, any]:
-    rancher_url = "https://raul-cabello.ngrok.app"
-    mcpUrl = "http://localhost:9092"
-
-    client_ctx = streamablehttp_client(
-        url=mcpUrl,
-        headers={
-             "R_token":"",
-             "R_url":rancher_url
-        }
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    
-    # if ENABLE_RAG is true, add the retriever tools to the tools list
-    """     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
-    """
-    agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
-    
-    return agent, session, client_ctx  # Return all three for cleanup
-
-def _get_system_prompt() -> str:
-    """
-    Retrieves the system prompt for the AI agent.
-
-    The function first attempts to get the prompt from an environment variable
-    named "SYSTEM_PROMPT". If the environment variable is not set, it returns
-    a default, hard-coded prompt.
-
-    Returns:
-        str: The system prompt to be used by the AI agent.
-    """
-
-    prompt = os.environ.get("SYSTEM_PROMPT")
-    if prompt:
-        return prompt
-    
-    return """You are a helpful and expert AI assistant integrated directly into the Rancher UI. Your primary goal is to assist users in managing their Kubernetes clusters and resources through the Rancher interface. You are a trusted partner, providing clear, confident, and safe guidance.
+RANCHER_AGENT_PROMPT = """You are a helpful and expert AI assistant integrated directly into the Rancher UI. Your primary goal is to assist users in managing their Kubernetes clusters and resources through the Rancher interface. You are a trusted partner, providing clear, confident, and safe guidance.
 
 ## CORE DIRECTIVES
 
@@ -154,4 +65,103 @@ The output should always be provided in Markdown format.
   - The third suggestion should be a 'discovery' action. It introduces a related but broader Rancher or Kubernetes topic, helping the user learn.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
+
+async def create_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
+    """ 
+    TODO check agents and create parent if needed!
+    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket, llm=llm)
+    rancher_agent_sub = ChildAgent(
+        name="rancher-agent",
+        description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
+        agent=rancher_agent
+    )
+    math_agent_sub = ChildAgent(
+            name="math-agent",
+            description="Agent that can help with math",
+            agent=create_math_agent()
+        )
+    parent_agent = create_parent_agent(llm=llm,subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
+    
+    return parent_agent
+ """
+    return await _create_rancher_core_agent(llm=llm, websocket=websocket)
+
+def _create_math_agent(llm: BaseLanguageModel) -> CompiledStateGraph:
+    """
+    Creates a simple math agent that can sum two numbers.
+    
+    Returns:
+        A compiled LangGraph agent capable of summing two numbers.
+    """
+    @tool
+    def sum_two_numbers(a: int, b: int) -> int:
+        """Sum two numbers together.
+        
+        Args:
+            a: The first number to sum
+            b: The second number to sum
+        
+        Returns:
+            The sum of a and b
+        """
+        print("Summing", a, "and", b)
+        return a + b
+
+
+    return create_agent(model=llm, tools=[sum_two_numbers])
+
+async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
+    cookies = websocket.cookies
+    rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
+    if websocket.url.port:
+        rancher_url += ":"+str(websocket.url.port)
+
+    token = os.environ.get("RANCHER_API_TOKEN", cookies.get("R_SESS", ""))
+    mcp_url = os.environ.get("MCP_URL", "rancher-mcp-server.cattle-ai-agent-system.svc")
+    if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() == "true":
+        mcp_url = "http://" + mcp_url
+    else:
+        mcp_url = "https://" + mcp_url
+
+    client_ctx = streamablehttp_client(
+        url=mcp_url,
+        headers={
+             "R_token": token,
+             "R_url": rancher_url
+        }
+    )
+    
+    read, write, _ = await client_ctx.__aenter__()
+    
+    # Initialize MCP session
+    session = ClientSession(read, write)
+    await session.__aenter__()
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+    
+    # if ENABLE_RAG is true, add the retriever tools to the tools list
+    """     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+    """
+    agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
+    
+    return agent, session, client_ctx  # Return all three for cleanup
+
+def _get_system_prompt() -> str:
+    """
+    Retrieves the system prompt for the AI agent.
+
+    The function first attempts to get the prompt from an environment variable
+    named "SYSTEM_PROMPT". If the environment variable is not set, it returns
+    a default, hard-coded prompt.
+
+    Returns:
+        str: The system prompt to be used by the AI agent.
+    """
+
+    prompt = os.environ.get("SYSTEM_PROMPT")
+    if prompt:
+        return prompt
+    
+    return RANCHER_AGENT_PROMPT
 

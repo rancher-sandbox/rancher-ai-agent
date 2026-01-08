@@ -32,7 +32,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     """
     await websocket.accept()
     logging.debug("ws connection opened")
-    agent, session, client_ctx = await create_agent(llm=llm)
+    agent, session, client_ctx = await create_agent(llm=llm, websocket=websocket)
     thread_id = str(uuid.uuid4())
             
     config = {
@@ -66,7 +66,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
             logging.info(f"Client {websocket.client.host} disconnected.")
             break
         except Exception as e:
-            logging.error(f"An error occurred: {e}")
+            logging.error(f"An error occurred: {e}", exc_info=True)
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
             else:
@@ -78,13 +78,6 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     # Close MCP session and client after WebSocket loop ends
     await session.__aexit__(None, None, None)
     await client_ctx.__aexit__(None, None, None)
-    """ await obs_session.__aexit__(None, None, None)
-    await obs_client_ctx.__aexit__(None, None, None)
-    await mlm_session.__aexit__(None, None, None)
-    await mlm_client_ctx.__aexit__(None, None, None)
-    await sec_session.__aexit__(None, None, None)
-    await sec_client_ctx.__aexit__(None, None, None) """
-    logging.debug("ws connection closed")
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
@@ -111,8 +104,8 @@ async def stream_agent_response(
     ):
         if stream["event"] == "on_chat_model_stream":
             if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
-                # TODO filter by node! summary and subagent choice should not be sent to the user
                 await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
+        
         if stream["event"] == "on_custom_event":
             await websocket.send_text(stream["data"])
     

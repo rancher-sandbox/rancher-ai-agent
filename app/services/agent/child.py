@@ -5,7 +5,7 @@ import langgraph.types
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
@@ -103,7 +103,7 @@ class ChildAgentBuilder:
         
         logging.debug("calling model")
 
-        messages = [self.system_prompt] + state["messages"]
+        messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
         response = self._invoke_llm_with_retry(messages, config)
 
         logging.debug("model call finished")

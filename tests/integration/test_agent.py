@@ -1,12 +1,15 @@
 from fastapi.testclient import TestClient
-from src.main import app
-from src.main import init_config, get_system_prompt
+from app.main import app
+from app.services.agent.agent import RANCHER_AGENT_PROMPT
+from app.services.llm import LLMManager
 from langchain_core.language_models import FakeMessagesListChatModel
 from mcp.server.fastmcp import FastMCP
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage, SystemMessage
 from _pytest.monkeypatch import MonkeyPatch
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.tools import BaseTool
+from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatGenerationChunk
 
 import time
 import multiprocessing
@@ -34,6 +37,7 @@ class FakeMessagesListChatModelWithTools(FakeMessagesListChatModel):
     """
     tools: list[BaseTool] = None
     messages_send_to_llm: LanguageModelInput = None
+    _current_response_index: int = 0
 
     def bind_tools(self, tools):
         self.tools = tools
@@ -43,6 +47,36 @@ class FakeMessagesListChatModelWithTools(FakeMessagesListChatModel):
         # Capture the input messages before invoking the parent method.
         self.messages_send_to_llm = remove_message_ids(input)
         return super().invoke(input, config, stop=stop, **kwargs)
+    
+    def _stream(self, input, config = None, *, stop = None, **kwargs):
+        """Override _stream to yield chunks from the response."""        
+        # Capture the input messages
+        self.messages_send_to_llm = remove_message_ids(input)
+        
+        # Get the next response from the list
+        if self._current_response_index < len(self.responses):
+            response = self.responses[self._current_response_index]
+            self._current_response_index += 1
+            
+            # Create a message chunk
+            if hasattr(response, 'content') and response.content:
+                chunk = AIMessageChunk(
+                    content=response.content, 
+                    tool_calls=response.tool_calls if hasattr(response, 'tool_calls') else [],
+                    id=response.id if hasattr(response, 'id') else None
+                )
+            elif hasattr(response, 'tool_calls') and response.tool_calls:
+                chunk = AIMessageChunk(
+                    content="", 
+                    tool_calls=response.tool_calls,
+                    id=response.id if hasattr(response, 'id') else None
+                )
+            else:
+                chunk = AIMessageChunk(content="")
+            
+            # Wrap in ChatGenerationChunk
+            yield ChatGenerationChunk(message=chunk)
+
 
 def remove_message_ids(messages: list[BaseMessage]) -> list[BaseMessage]:
     """
@@ -98,23 +132,7 @@ def setup_mock_mcp_server(module_monkeypatch):
 
     process.terminate()
 
-@pytest.mark.parametrize(
-        ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
-        [
-            (
-                ["fake prompt"],
-                [
-                    AIMessage(
-                        content="fake llm response",
-                    ),
-                ], 
-                [
-                    get_system_prompt(), 
-                    HumanMessage(content="fake prompt"), 
-                ],
-                ["<message>fake llm response</message>"]
-            ),
-            (
+""" (
                 ["fake prompt 1",
                  "fake prompt 2"],
                 [
@@ -126,7 +144,7 @@ def setup_mock_mcp_server(module_monkeypatch):
                     ),
                 ], 
                 [
-                    get_system_prompt(), 
+                    RANCHER_AGENT_PROMPT, 
                     HumanMessage(content="fake prompt 1"), 
                     AIMessage(
                         content="fake llm response 1",
@@ -152,7 +170,68 @@ def setup_mock_mcp_server(module_monkeypatch):
                     ),
                 ], 
                 [
-                    get_system_prompt(), 
+                    RANCHER_AGENT_PROMPT, 
+                    HumanMessage(content="sum 4 + 5"), 
+                    AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
+                    ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
+                ],
+                ["<message>fake llm response</message>"]
+             ) """
+@pytest.mark.parametrize(
+        ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
+        [
+            (
+                ["fake prompt"],
+                [
+                    AIMessage(
+                        content="fake llm response",
+                    ),
+                ], 
+                [
+                    SystemMessage(content=RANCHER_AGENT_PROMPT),
+                    HumanMessage(content="fake prompt"), 
+                ],
+                ["<message>fake llm response</message>"]
+            ),
+             (
+                ["fake prompt 1",
+                 "fake prompt 2"],
+                [
+                    AIMessage(
+                        content="fake llm response 1",
+                    ),
+                     AIMessage(
+                        content="fake llm response 2",
+                    ),
+                ], 
+                [
+                    SystemMessage(content=RANCHER_AGENT_PROMPT), 
+                    HumanMessage(content="fake prompt 1"), 
+                    AIMessage(
+                        content="fake llm response 1",
+                    ),
+                    HumanMessage(content="fake prompt 2"), 
+                ],
+                ["<message>fake llm response 1</message>",
+                 "<message>fake llm response 2</message>"]
+            ),
+             (
+                ["sum 4 + 5"],
+                [
+                    AIMessage(
+                        content="", # The content is empty when a tool is called
+                        tool_calls=[{
+                            "id": "call_1",
+                            "name": "add",
+                            "args": {"a": 4, "b": 5}
+                        }]
+                    ),
+                    AIMessage(
+                        content="fake llm response",
+                    ),
+                ], 
+                [
+                    SystemMessage(content=RANCHER_AGENT_PROMPT), 
                     HumanMessage(content="sum 4 + 5"), 
                     AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
                     ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
@@ -164,17 +243,21 @@ def setup_mock_mcp_server(module_monkeypatch):
 def test_websocket_connection_and_agent_interaction(prompts: list[str], fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
     """Tests the full agent interaction flow through a WebSocket connection."""
     fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
-    init_config["llm"] = fake_llm
+    LLMManager._instance = fake_llm
     
-    messages = []
-    with client.websocket_connect("/agent/ws") as websocket:
-        for prompt in prompts:
-            websocket.send_text(prompt)
-            msg = ""
-            while not msg.endswith("</message>"):
-                msg += websocket.receive_text()
+    try:
+        messages = []
+        with client.websocket_connect("/agent/ws") as websocket:
+            for prompt in prompts:
+                websocket.send_text(prompt)
+                msg = ""
+                while not msg.endswith("</message>"):
+                    msg += websocket.receive_text()
 
-            messages.append(msg)
-        
-    assert messages == expected_messages_send_to_websocket
-    assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
+                messages.append(msg)
+            
+        assert messages == expected_messages_send_to_websocket
+        assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
+    finally:
+        # Reset the LLM manager instance after each test
+        LLMManager._instance = None
