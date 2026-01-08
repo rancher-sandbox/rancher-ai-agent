@@ -1,6 +1,7 @@
 import os
 
 from .child import create_child_agent
+from ..rag import fleet_documentation_retriever, rancher_documentation_retriever
 from fastapi import  WebSocket
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -113,9 +114,6 @@ def _create_math_agent(llm: BaseLanguageModel) -> CompiledStateGraph:
 async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
     cookies = websocket.cookies
     rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
-    if websocket.url.port:
-        rancher_url += ":"+str(websocket.url.port)
-
     token = os.environ.get("RANCHER_API_TOKEN", cookies.get("R_SESS", ""))
     mcp_url = os.environ.get("MCP_URL", "rancher-mcp-server.cattle-ai-agent-system.svc")
     if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() == "true":
@@ -140,9 +138,9 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
     tools = await load_mcp_tools(session)
     
     # if ENABLE_RAG is true, add the retriever tools to the tools list
-    """     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+    if os.environ.get("ENABLE_RAG", "false").lower() == "true":
         tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
-    """
+
     agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
     
     return agent, session, client_ctx  # Return all three for cleanup
