@@ -132,51 +132,6 @@ def setup_mock_mcp_server(module_monkeypatch):
 
     process.terminate()
 
-""" (
-                ["fake prompt 1",
-                 "fake prompt 2"],
-                [
-                    AIMessage(
-                        content="fake llm response 1",
-                    ),
-                     AIMessage(
-                        content="fake llm response 2",
-                    ),
-                ], 
-                [
-                    RANCHER_AGENT_PROMPT, 
-                    HumanMessage(content="fake prompt 1"), 
-                    AIMessage(
-                        content="fake llm response 1",
-                    ),
-                    HumanMessage(content="fake prompt 2"), 
-                ],
-                ["<message>fake llm response 1</message>",
-                 "<message>fake llm response 2</message>"]
-            ),
-            (
-                ["sum 4 + 5"],
-                [
-                    AIMessage(
-                        content="", # The content is empty when a tool is called
-                        tool_calls=[{
-                            "id": "call_1",
-                            "name": "add",
-                            "args": {"a": 4, "b": 5}
-                        }]
-                    ),
-                    AIMessage(
-                        content="fake llm response",
-                    ),
-                ], 
-                [
-                    RANCHER_AGENT_PROMPT, 
-                    HumanMessage(content="sum 4 + 5"), 
-                    AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
-                    ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
-                ],
-                ["<message>fake llm response</message>"]
-             ) """
 @pytest.mark.parametrize(
         ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
         [
