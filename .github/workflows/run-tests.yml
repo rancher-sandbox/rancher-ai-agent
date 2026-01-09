@@ -30,5 +30,5 @@ jobs:
         run: uv run pytest tests/unit -vv
 
       - name: Execute integration tests
-        run: uv run pytest tests/integration -vv
+        run: uv run pytest tests/integration -o log_cli=true
 

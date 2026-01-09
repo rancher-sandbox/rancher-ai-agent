@@ -11,6 +11,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
+import logging
 import time
 import multiprocessing
 import requests
@@ -26,6 +27,7 @@ def add(a: int, b: int) -> str:
 
 def run_mock_mcp():
     """Runs the mock MCP server."""
+    logging.error("Starting mock MCP server...")
     mock_mcp.run(transport="streamable-http")
 
 client = TestClient(app)
@@ -109,28 +111,50 @@ def module_monkeypatch(request):
 
     mpatch.undo()
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def setup_mock_mcp_server(module_monkeypatch):
     """Sets up and tears down a mock MCP server for the duration of the test module."""
     module_monkeypatch.setenv("MCP_URL", "localhost:8000/mcp")
     module_monkeypatch.setenv("INSECURE_SKIP_TLS", "true")
+    logging.debug("11Checking mock MCP server availability...")
 
     process = multiprocessing.Process(target=run_mock_mcp)
     process.start()
 
     # Wait for the mock server to be available before running tests.
     mcp_server_available = False
+    max_attempts = 100  # 10 seconds total
+    attempts = 0
 
-    while not mcp_server_available:
+    while not mcp_server_available and attempts < max_attempts:
         try:
-            requests.get("http://localhost:8000/mcp")
+            logging.error(f"Checking mock MCP server availability... (attempt {attempts + 1}/{max_attempts})")
+            requests.get("http://localhost:8000/mcp", timeout=1)
+            logging.error("Mock MCP server is available.")
             mcp_server_available = True
         except requests.exceptions.ConnectionError:
+            logging.error("Mock MCP server not available yet, retrying...")
+            attempts += 1
             time.sleep(0.1)
-       
+        except Exception as e:
+            logging.error(f"Unexpected error checking MCP server: {e}")
+            attempts += 1
+            time.sleep(0.1)
+    
+    if not mcp_server_available:
+        process.terminate()
+        process.join(timeout=5)
+        raise RuntimeError(f"Mock MCP server failed to start after {max_attempts} attempts")
+    
+    logging.error("Mock MCP server is ready!")
     yield process
 
+    logging.debug("Shutting down mock MCP server...")
     process.terminate()
+    process.join(timeout=5)
+    if process.is_alive():
+        logging.debug("Force killing mock MCP server...")
+        process.kill()
 
 @pytest.mark.parametrize(
         ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
@@ -195,12 +219,12 @@ def setup_mock_mcp_server(module_monkeypatch):
              )
         ]
 )
-@pytest.mark.skip(reason="Fails in GH Actions with cancel scope error")
-def test_websocket_connection_and_agent_interaction(prompts: list[str], fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
+def test_websocket_connection_and_agent_interaction(setup_mock_mcp_server, prompts: list[str], fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
     """Tests the full agent interaction flow through a WebSocket connection."""
     fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
     LLMManager._instance = fake_llm
-    
+    logging.debug("Starting test..")
+
     try:
         messages = []
         with client.websocket_connect("/agent/ws") as websocket:
