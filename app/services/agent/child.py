@@ -5,26 +5,26 @@ import langgraph.types
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.config import get_stream_writer
 from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
+from langchain_core.callbacks.manager import dispatch_custom_event
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
-class AgentState(TypedDict):
+class ChildAgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
-class K8sAgentBuilder:
+class ChildAgentBuilder:
     def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
         """
-        Initializes the K8sAgentBuilder.
+        Initializes the ChildAgentBuilder.
 
         Args:
             llm: The language model to use for the agent's decisions.
@@ -39,7 +39,7 @@ class K8sAgentBuilder:
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.tools_by_name = {tool.name: tool for tool in self.tools}
     
-    def summarize_conversation_node(self, state: AgentState):
+    def summarize_conversation_node(self, state: ChildAgentState):
         """
         Summarizes the conversation history.
 
@@ -85,7 +85,7 @@ class K8sAgentBuilder:
                     continue
                 raise e
 
-    def call_model_node(self, state: AgentState, config: RunnableConfig):
+    def call_model_node(self, state: ChildAgentState, config: RunnableConfig):
         """
         Invokes the language model with the current state and context.
 
@@ -103,14 +103,14 @@ class K8sAgentBuilder:
         
         logging.debug("calling model")
 
-        messages = [self.system_prompt] + state["messages"]
+        messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
         response = self._invoke_llm_with_retry(messages, config)
 
         logging.debug("model call finished")
 
         return {"messages": [response]}
 
-    async def tool_node(self, state: AgentState):
+    async def tool_node(self, state: ChildAgentState):
         """
         Executes tools based on the LLM's request.
 
@@ -147,10 +147,13 @@ class K8sAgentBuilder:
                 )
             except ToolException as e:
                 return {"messages": str(e)}
+            except Exception as e:
+                logging.error(f"unexpected error during tool call: {e}")
+                return {"messages": f"unexpected error during tool call: {e}"}
 
         return {"messages": outputs}
     
-    def should_summarize_conversation(self, state: AgentState):
+    def should_summarize_conversation(self, state: ChildAgentState):
         """
         Determines the next step in the agent's workflow.
 
@@ -172,7 +175,20 @@ class K8sAgentBuilder:
         else:
             return "continue"
         
-    def should_continue_after_interrupt(self, state: AgentState):
+    def should_continue_after_interrupt(self, state: ChildAgentState):
+        """
+        Determines whether to continue execution after a tool interruption.
+
+        This conditional edge checks if the last message indicates that a tool
+        execution was cancelled by the user. If so, it ends the workflow;
+        otherwise, it continues back to the agent node.
+
+        Args:
+            state: The current state of the agent.
+
+        Returns:
+            A string indicating the next node: "end" if the user cancelled,
+            or "continue" to proceed with the agent."""
         messages = state["messages"]
         last_message = messages[-1]
         if isinstance(last_message, ToolMessage) and last_message.content == INTERRUPT_CANCEL_MESSAGE:
@@ -188,7 +204,7 @@ class K8sAgentBuilder:
         Returns:
             A compiled LangGraph StateGraph ready to be invoked.
         """
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(ChildAgentState)
         workflow.add_node("agent", self.call_model_node)
         workflow.add_node("tools", self.tool_node)
         workflow.add_node("summarize_conversation", self.summarize_conversation_node)
@@ -214,11 +230,11 @@ class K8sAgentBuilder:
 
         return workflow.compile(checkpointer=self.checkpointer)
 
-def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
+def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
     """
     Creates a LangGraph agent capable of interacting with Rancher and Kubernetes resources.
     
-    This factory function instantiates the K8sAgentBuilder, builds the agent graph,
+    This factory function instantiates the AgentBuilder, builds the agent graph,
     and returns the compiled agent.
     
     Args:
@@ -229,7 +245,7 @@ def create_k8s_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: s
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-    builder = K8sAgentBuilder(llm, tools, system_prompt, checkpointer)
+    builder = ChildAgentBuilder(llm, tools, system_prompt, checkpointer)
 
     return builder.build()
 
@@ -314,14 +330,15 @@ def _process_tool_result(tool_result: str | list) -> str:
         json_result = json.loads(tool_result)
 
         if "uiContext" in json_result:
-            writer = get_stream_writer()
-            if writer:
-                writer(f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
+            dispatch_custom_event(
+            "ui_context",
+            f"<mcp-response>{json.dumps(json_result['uiContext'])}</mcp-response>")
         if "docLinks" in json_result:
-            writer = get_stream_writer()
             for link in json_result['docLinks']:
-                writer(f"<mcp-doclink>{link}</mcp-doclink>")
-        
+                dispatch_custom_event(
+                "dock_link",
+                f"<mcp-doclink>{link}</mcp-doclink>")
+
         # Return the value for the LLM, or the full object if 'llm' key is not present
         return _convert_to_string_if_needed(json_result.get("llm", json_result))
     except (json.JSONDecodeError, TypeError):

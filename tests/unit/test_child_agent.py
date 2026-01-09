@@ -1,8 +1,8 @@
 import pytest
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.agents.k8s import K8sAgentBuilder
-from langchain_core.messages import ToolMessage
+from app.services.agent.child import ChildAgentBuilder
+from langchain_core.messages import SystemMessage
 
 class FakeMessage:
     def __init__(self, tool_calls=None):
@@ -34,7 +34,7 @@ def mock_checkpointer():
 
 def test_builder_initialization_binds_tools(mock_llm, mock_tools, mock_checkpointer):
     """Tests that the K8sAgentBuilder correctly initializes and binds tools to the LLM."""
-    builder = K8sAgentBuilder(
+    builder = ChildAgentBuilder(
         llm=mock_llm,
         tools=mock_tools,
         system_prompt="system_prompt",
@@ -45,10 +45,10 @@ def test_builder_initialization_binds_tools(mock_llm, mock_tools, mock_checkpoin
     mock_llm.bind_tools.assert_called_once_with(mock_tools)
 
 @pytest.mark.asyncio
-@patch("src.agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
+@patch("app.services.agent.child.langgraph.types.interrupt", new=MagicMock(return_value={"response": "no"}))
 async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock_checkpointer):
     """Tests that tool execution is cancelled if the user responds 'no' to the confirmation prompt."""
-    builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
+    builder = ChildAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
     tool_call = {
         "id": "123",
         "name": "patchKubernetesResource",
@@ -62,10 +62,10 @@ async def test_tool_node_human_verification_cancelled(mock_llm, mock_tools, mock
     assert result["messages"].content == "tool execution cancelled by the user"
 
 @pytest.mark.asyncio
-@patch("src.agents.k8s.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
+@patch("app.services.agent.child.langgraph.types.interrupt", new=MagicMock(return_value={"response": "yes"}))
 async def test_tool_node_human_verification_approved(mock_llm, mock_tools, mock_checkpointer):
     """Tests that tool execution proceeds if the user responds 'yes' to the confirmation prompt."""
-    builder = K8sAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
+    builder = ChildAgentBuilder(llm=mock_llm, tools=mock_tools, system_prompt="system_prompt", checkpointer=mock_checkpointer)
     tool_call = {
         "id": "123",
         "name": "patchKubernetesResource",
@@ -83,7 +83,7 @@ async def test_tool_node_human_verification_approved(mock_llm, mock_tools, mock_
 @pytest.mark.asyncio
 async def test_tool_node_executes_tool_without_confirmation(mock_llm, mock_tools, mock_checkpointer):
     """Tests that a tool not requiring confirmation is executed directly."""
-    builder = K8sAgentBuilder(
+    builder = ChildAgentBuilder(
         llm=mock_llm,
         tools=mock_tools,
         system_prompt="system_prompt",
@@ -106,7 +106,7 @@ async def test_tool_node_executes_tool_without_confirmation(mock_llm, mock_tools
 
 def test_call_model_node_includes_system_prompt(mock_llm, mock_tools, mock_checkpointer):
     """Tests that the system prompt is included in the messages sent to the LLM."""
-    builder = K8sAgentBuilder(
+    builder = ChildAgentBuilder(
         llm=mock_llm,
         tools=mock_tools,
         system_prompt="system_prompt",
@@ -119,5 +119,5 @@ def test_call_model_node_includes_system_prompt(mock_llm, mock_tools, mock_check
     result = builder.call_model_node(state, config)
 
     assert result["messages"][0] == "llm_response"
-    mock_llm.invoke.assert_called_once_with(["system_prompt", fake_message], config)
+    mock_llm.invoke.assert_called_once_with([SystemMessage(content="system_prompt"), fake_message], config)
  
