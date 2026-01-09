@@ -69,49 +69,28 @@ Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check
 
 async def create_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
     """ 
-    TODO check agents and create parent if needed!
-    rancher_agent, session, client_ctx = await create_rancher_agent(websocket=websocket, llm=llm)
-    rancher_agent_sub = ChildAgent(
-        name="rancher-agent",
-        description="Agent specialized in managing Rancher and Kubernetes resources through the Rancher UI.",
-        agent=rancher_agent
-    )
-    math_agent_sub = ChildAgent(
-            name="math-agent",
-            description="Agent that can help with math",
-            agent=create_math_agent()
-        )
-    parent_agent = create_parent_agent(llm=llm,subagents=[rancher_agent_sub, math_agent_sub],checkpointer=InMemorySaver())
-    
-    return parent_agent
- """
+    TODO multiagent support
+    """
     return await _create_rancher_core_agent(llm=llm, websocket=websocket)
 
-def _create_math_agent(llm: BaseLanguageModel) -> CompiledStateGraph:
+async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
     """
-    Creates a simple math agent that can sum two numbers.
+    Creates a Rancher core agent with MCP client connection.
+    
+    This function sets up an agent specialized in managing Rancher and Kubernetes resources
+    through the Rancher UI. It establishes a connection to the MCP server for tool execution
+    and returns the agent along with the session and client context for proper cleanup.
+    
+    Args:
+        llm: The language model to use for the agent.
+        websocket: WebSocket connection to extract Rancher URL and authentication token.
     
     Returns:
-        A compiled LangGraph agent capable of summing two numbers.
+        Tuple of (agent, session, client_ctx) where:
+            - agent: The compiled LangGraph agent ready to process requests
+            - session: MCP ClientSession that needs to be closed after use
+            - client_ctx: MCP client context manager that needs to be closed after use
     """
-    @tool
-    def sum_two_numbers(a: int, b: int) -> int:
-        """Sum two numbers together.
-        
-        Args:
-            a: The first number to sum
-            b: The second number to sum
-        
-        Returns:
-            The sum of a and b
-        """
-        print("Summing", a, "and", b)
-        return a + b
-
-
-    return create_agent(model=llm, tools=[sum_two_numbers])
-
-async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
     cookies = websocket.cookies
     rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
     token = os.environ.get("RANCHER_API_TOKEN", cookies.get("R_SESS", ""))

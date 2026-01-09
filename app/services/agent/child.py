@@ -24,7 +24,7 @@ class ChildAgentState(TypedDict):
 class ChildAgentBuilder:
     def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
         """
-        Initializes the AgentBuilder.
+        Initializes the ChildAgentBuilder.
 
         Args:
             llm: The language model to use for the agent's decisions.
@@ -176,6 +176,19 @@ class ChildAgentBuilder:
             return "continue"
         
     def should_continue_after_interrupt(self, state: ChildAgentState):
+        """
+        Determines whether to continue execution after a tool interruption.
+
+        This conditional edge checks if the last message indicates that a tool
+        execution was cancelled by the user. If so, it ends the workflow;
+        otherwise, it continues back to the agent node.
+
+        Args:
+            state: The current state of the agent.
+
+        Returns:
+            A string indicating the next node: "end" if the user cancelled,
+            or "continue" to proceed with the agent."""
         messages = state["messages"]
         last_message = messages[-1]
         if isinstance(last_message, ToolMessage) and last_message.content == INTERRUPT_CANCEL_MESSAGE:

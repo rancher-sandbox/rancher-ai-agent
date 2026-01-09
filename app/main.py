@@ -44,9 +44,6 @@ async def lifespan(app: FastAPI):
     try:
         LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
         logging.getLogger().setLevel(LOG_LEVEL)
-        """ logging.info(f"Using model: {init_config['llm']}")
-        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-            init_rag_retriever() """
         if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
             SimpleTruststore().set_truststore()
     except ValueError as e:

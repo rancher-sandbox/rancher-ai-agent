@@ -8,10 +8,26 @@ from langchain_core.language_models.llms import BaseLanguageModel
 from langchain_aws import ChatBedrockConverse
 
 class LLMManager:
+    """
+    Singleton manager for language model instances.
+    
+    This class ensures that only one instance of the language model is created
+    and reused throughout the application, avoiding redundant initializations
+    and ensuring consistent model configuration.
+    """
     _instance: BaseLanguageModel = None
 
     @classmethod
     def get_instance(cls) -> BaseLanguageModel:
+        """
+        Retrieves the singleton instance of the language model.
+        
+        If the instance doesn't exist yet, it initializes it by calling get_llm().
+        Subsequent calls return the same instance.
+        
+        Returns:
+            The singleton language model instance.
+        """
         if cls._instance is None:
             cls._instance = get_llm()
             logging.info(f"Using model: {cls._instance}")

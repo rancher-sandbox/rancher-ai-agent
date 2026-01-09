@@ -3,10 +3,9 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 
-# This is the UI for testing. This will be replaced by the UI extension
 @router.get("/agent")
 async def get(request: Request):
-    """Serves the main HTML page for the chat client."""
+    """ONLY FOR TESTING. This serves the test HTML page for the chat client."""
     with open("app/routers/testui.html") as f:
         html_content = f.read()
         modified_html = html_content.replace("{{ url }}", request.url.hostname)

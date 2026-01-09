@@ -75,7 +75,8 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.send_text("</message>")
     
-    # Close MCP session and client after WebSocket loop ends
+    # Clean up MCP session and client. Each user requires their own session for token-based authentication.
+    # TODO: Remove per-user sessions once OAuth 2.0 is implemented.
     await session.__aexit__(None, None, None)
     await client_ctx.__aexit__(None, None, None)
 
