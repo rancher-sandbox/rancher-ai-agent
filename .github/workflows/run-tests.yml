@@ -1,5 +1,4 @@
-name: Python Tests (using uv)
-
+name: Run Python Tests
 on:
   push:
     branches:
@@ -28,8 +27,8 @@ jobs:
         run: uv sync --all-groups
         
       - name: Execute unit tests
-        run: uv run pytest tests/unit
+        run: uv run pytest tests/unit -vv
 
       - name: Execute integration tests
-        run: uv run pytest tests/integration
+        run: uv run pytest tests/integration -vv
 

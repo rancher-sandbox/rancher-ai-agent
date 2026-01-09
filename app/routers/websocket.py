@@ -77,8 +77,11 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     
     # Clean up MCP session and client. Each user requires their own session for token-based authentication.
     # TODO: Remove per-user sessions once OAuth 2.0 is implemented.
-    await session.__aexit__(None, None, None)
-    await client_ctx.__aexit__(None, None, None)
+    try:
+        await session.__aexit__(None, None, None)
+        await client_ctx.__aexit__(None, None, None)
+    except Exception as e:
+        logging.error(f"Error during mcp session and client cleanup: {e}", exc_info=True)
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
