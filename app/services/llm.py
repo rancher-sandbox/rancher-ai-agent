@@ -36,6 +36,9 @@ class LLMManager:
 def get_llm() -> BaseLanguageModel:
     """
     Selects and returns a language model instance based on environment variables.
+    - If an active LLM is specified, it prioritizes that model; otherwise, it checks for available configurations in a predefined order.
+    - If no supported model or API key is found, it raises a ValueError.
+    - If LLM mocking is enabled, it configures the connections to the mock server.
     
     Returns:
         An instance of a language model.
@@ -50,6 +53,11 @@ def get_llm() -> BaseLanguageModel:
 
     model = get_llm_model(active)
     
+    llm_mock_enabled = os.environ.get("LLM_MOCK_ENABLED", False)
+    llm_mock_url = os.environ.get("LLM_MOCK_URL", "")
+    if active and llm_mock_enabled:
+        logging.info(f"Connecting to LLM Mock server at {llm_mock_url}")
+    
     ollama_url = os.environ.get("OLLAMA_URL")
     gemini_key = os.environ.get("GOOGLE_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
@@ -57,15 +65,26 @@ def get_llm() -> BaseLanguageModel:
     aws_region = os.environ.get("AWS_REGION")
 
     if active == "ollama":
+        if llm_mock_enabled:
+            return ChatOllama(model=model, base_url=llm_mock_url)
         return ChatOllama(model=model, base_url=ollama_url)
     if active == "gemini":
+        if llm_mock_enabled:
+            return ChatGoogleGenerativeAI(
+                model=model,
+                base_url=llm_mock_url,
+                transport="rest"
+            )
         return ChatGoogleGenerativeAI(model=model)
     if active == "openai":
+        if llm_mock_enabled:
+            return ChatOpenAI(model=model, base_url=llm_mock_url)
         if openai_url:
             return ChatOpenAI(model=model, base_url=openai_url)
-        else:
-            return ChatOpenAI(model=model)
+        return ChatOpenAI(model=model)
     if active == "bedrock":
+        if llm_mock_enabled:
+            os.environ["AWS_ENDPOINT_URL"] = llm_mock_url
         return ChatBedrockConverse(model=model)
 
     # default order if active is not specified
