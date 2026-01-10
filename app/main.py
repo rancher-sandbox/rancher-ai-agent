@@ -34,10 +34,14 @@ class SimpleTruststore:
     def set_truststore(self):
         company_cert_path = "/etc/tls/tls.crt"
         output_path = "/combined.crt"
-        truststore_path = self.create_combined(
-            company_cert_path=company_cert_path, output_path=output_path
-        )
-        self.use_truststore(truststore_path=truststore_path)
+
+        if os.path.exists(company_cert_path):
+            truststore_path = self.create_combined(
+                company_cert_path=company_cert_path, output_path=output_path
+            )
+            self.use_truststore(truststore_path=truststore_path)
+        else:
+            logging.warning(f"Company cert not found at {company_cert_path}, skipping truststore setup.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
