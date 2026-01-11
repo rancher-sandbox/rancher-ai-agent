@@ -1,0 +1,139 @@
+name: Sync Milestones and Labels Across Repos
+
+on:
+  milestone:
+    types: [created, edited, closed, opened, deleted]
+  label:
+    types: [created, edited, deleted]
+
+jobs:
+  sync-milestones-and-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync milestones and labels to other repos
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.MILESTONE_SYNC_TOKEN }}
+          script: |
+            const targetRepos = [
+              { owner: 'rancher-sandbox', repo: 'rancher-ai-ui' },
+              { owner: 'rancher-sandbox', repo: 'rancher-ai-mcp' },
+              { owner: 'rancher-sandbox', repo: 'rancher-ai-agent' }
+            ];
+            
+            // Handle Milestone Events
+            if (context.payload.milestone) {
+              const milestone = context.payload.milestone;
+              const action = context.payload.action;
+              
+              console.log(`Processing ${action} for milestone: ${milestone.title}`);
+              
+              for (const target of targetRepos) {
+                try {
+                  // Find existing milestone by title
+                  const { data: existingMilestones } = await github.rest.issues.listMilestones({
+                    owner: target.owner,
+                    repo: target.repo,
+                    state: 'all'
+                  });
+                  
+                  const existingMilestone = existingMilestones.find(m => m.title === milestone.title);
+                  
+                  if (action === 'deleted') {
+                    if (existingMilestone) {
+                      await github.rest.issues.deleteMilestone({
+                        owner: target.owner,
+                        repo: target.repo,
+                        milestone_number: existingMilestone.number
+                      });
+                      console.log(`✓ Deleted milestone in ${target.owner}/${target.repo}`);
+                    }
+                  } else if (action === 'created' && !existingMilestone) {
+                    await github.rest.issues.createMilestone({
+                      owner: target.owner,
+                      repo: target.repo,
+                      title: milestone.title,
+                      description: milestone.description || '',
+                      due_on: milestone.due_on || undefined,
+                      state: milestone.state
+                    });
+                    console.log(`✓ Created milestone in ${target.owner}/${target.repo}`);
+                  } else if ((action === 'edited' || action === 'closed' || action === 'opened') && existingMilestone) {
+                    await github.rest.issues.updateMilestone({
+                      owner: target.owner,
+                      repo: target.repo,
+                      milestone_number: existingMilestone.number,
+                      title: milestone.title,
+                      description: milestone.description || '',
+                      due_on: milestone.due_on || undefined,
+                      state: milestone.state
+                    });
+                    console.log(`✓ Updated milestone in ${target.owner}/${target.repo}`);
+                  }
+                } catch (error) {
+                  console.error(`✗ Error syncing milestone to ${target.owner}/${target.repo}:`, error.message);
+                }
+              }
+            }
+            
+            // Handle Label Events
+            if (context.payload.label) {
+              const label = context.payload.label;
+              const action = context.payload.action;
+              
+              console.log(`Processing ${action} for label: ${label.name}`);
+              
+              for (const target of targetRepos) {
+                try {
+                  // Find existing label by name
+                  let existingLabel = null;
+                  try {
+                    const { data } = await github.rest.issues.getLabel({
+                      owner: target.owner,
+                      repo: target.repo,
+                      name: label.name
+                    });
+                    existingLabel = data;
+                  } catch (error) {
+                    // Label doesn't exist, which is fine for create operations
+                    if (error.status !== 404) throw error;
+                  }
+                  
+                  if (action === 'deleted') {
+                    if (existingLabel) {
+                      await github.rest.issues.deleteLabel({
+                        owner: target.owner,
+                        repo: target.repo,
+                        name: label.name
+                      });
+                      console.log(`✓ Deleted label in ${target.owner}/${target.repo}`);
+                    }
+                  } else if (action === 'created') {
+                    if (existingLabel) {
+                      console.log(`⊘ Label "${label.name}" already exists in ${target.owner}/${target.repo}, skipping`);
+                    } else {
+                      await github.rest.issues.createLabel({
+                        owner: target.owner,
+                        repo: target.repo,
+                        name: label.name,
+                        color: label.color,
+                        description: label.description || ''
+                      });
+                      console.log(`✓ Created label in ${target.owner}/${target.repo}`);
+                    }
+                  } else if (action === 'edited' && existingLabel) {
+                    await github.rest.issues.updateLabel({
+                      owner: target.owner,
+                      repo: target.repo,
+                      name: label.name,
+                      new_name: label.name,
+                      color: label.color,
+                      description: label.description || ''
+                    });
+                    console.log(`✓ Updated label in ${target.owner}/${target.repo}`);
+                  }
+                } catch (error) {
+                  console.error(`✗ Error syncing label to ${target.owner}/${target.repo}:`, error.message);
+                }
+              }
+            }
