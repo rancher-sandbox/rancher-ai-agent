@@ -1,6 +1,6 @@
 import os
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 
 from .child import create_child_agent
 from ..rag import fleet_documentation_retriever, rancher_documentation_retriever
@@ -69,29 +69,36 @@ The output should always be provided in Markdown format.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
 
-async def create_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
+@asynccontextmanager
+async def create_agent(llm: BaseLanguageModel, websocket: WebSocket):
     """ 
-    TODO multiagent support
-    """
-    return await _create_rancher_core_agent(llm=llm, websocket=websocket)
-
-async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
-    """
-    Creates a Rancher core agent with MCP client connection.
+    Async context manager that creates an agent and handles MCP resource cleanup.
     
-    This function sets up an agent specialized in managing Rancher and Kubernetes resources
-    through the Rancher UI. It establishes a connection to the MCP server for tool execution
-    and returns the agent along with the session and client context for proper cleanup.
+    Usage:
+        async with create_agent(llm, websocket) as agent:
+            # Use agent here
+            pass
+    
+    Yields:
+        CompiledStateGraph: The compiled LangGraph agent ready to process requests
+    """
+    async with AsyncExitStack() as stack:
+        tools = await _create_rancher_core_agent(stack, llm, websocket)
+        agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
+        
+        yield agent
+
+async def _create_rancher_core_agent(stack: AsyncExitStack, llm: BaseLanguageModel, websocket: WebSocket) -> list:
+    """
+    Creates a Rancher core agent by connecting to MCP server and loading tools.
     
     Args:
-        llm: The language model to use for the agent.
-        websocket: WebSocket connection to extract Rancher URL and authentication token.
+        stack: AsyncExitStack to manage async context managers
+        llm: The language model to use for the agent
+        websocket: WebSocket connection to extract Rancher URL and authentication token
     
     Returns:
-        Tuple of (agent, session, client_ctx) where:
-            - agent: The compiled LangGraph agent ready to process requests
-            - session: MCP ClientSession that needs to be closed after use
-            - client_ctx: MCP client context manager that needs to be closed after use
+        List of tools loaded from the MCP server
     """
     cookies = websocket.cookies
     rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
@@ -102,19 +109,17 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
     else:
         mcp_url = "https://" + mcp_url
 
-    client_ctx = streamablehttp_client(
-        url=mcp_url,
-        headers={
-             "R_token": token,
-             "R_url": rancher_url
-        }
+    read, write, _ = await stack.enter_async_context(
+        streamablehttp_client(
+            url=mcp_url,
+            headers={
+                "R_token": token,
+                "R_url": rancher_url
+            }
+        )
     )
     
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
+    session = await stack.enter_async_context(ClientSession(read, write))
     await session.initialize()
     tools = await load_mcp_tools(session)
     
@@ -122,9 +127,7 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
         tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
 
-    agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
-    
-    return agent, session, client_ctx  # Return all three for cleanup
+    return tools
 
 def _get_system_prompt() -> str:
     """

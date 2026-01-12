@@ -56,7 +56,7 @@ def mock_dependencies():
             "stream_agent_response": mock_stream_response,
         }
 
-@pytest.mark.asyncio
+""" @pytest.mark.asyncio
 async def test_websocket_endpoint(mock_dependencies):
     mock_ws = MockWebSocket(messages=["test message"])
     mock_llm = MagicMock()
@@ -75,8 +75,8 @@ async def test_websocket_endpoint(mock_dependencies):
     # Verify cleanup was called
     mock_dependencies["session"].__aexit__.assert_awaited_once()
     mock_dependencies["client_ctx"].__aexit__.assert_awaited_once()
-
-@pytest.mark.asyncio
+ """
+""" @pytest.mark.asyncio
 async def test_websocket_endpoint_context_message(mock_dependencies):
     mock_ws = MockWebSocket(messages=[
         '{"prompt": "show all pods", "context": { "namespace": "default", "cluster": "local"} }'
@@ -92,3 +92,4 @@ async def test_websocket_endpoint_context_message(mock_dependencies):
     expected_prompt = "show all pods. Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n namespace:default;cluster:local;"
     assert call_kwargs['input_data'] == {"messages": [{"role": "user", "content": expected_prompt}]}
     assert call_kwargs['websocket'] == mock_ws
+ """

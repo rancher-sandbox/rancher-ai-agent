@@ -32,56 +32,52 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     """
     await websocket.accept()
     logging.debug("ws connection opened")
-    agent, session, client_ctx = await create_agent(llm=llm, websocket=websocket)
-    thread_id = str(uuid.uuid4())
-            
-    config = {
-        "thread_id": thread_id,
-    }
-    if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
-        langfuse_handler = CallbackHandler()
-        config["callbacks"] = [langfuse_handler]
-
-    while True:
-        try:
-            request = await websocket.receive_text()
-            
-            ws_request = _parse_websocket_request(request)
-            if ws_request.context:
-                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
-                for key, value in ws_request.context.items():
-                    context_prompt += f"{key}:{value};"
-                ws_request.prompt += context_prompt
-            if ws_request.agent:
-                config["agent"] = ws_request.agent
-            else:
-                config["agent"] = ""
-
-            await stream_agent_response(
-                agent=agent,
-                input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
-                config=config,
-                websocket=websocket)
-        except WebSocketDisconnect:
-            logging.info(f"Client {websocket.client.host} disconnected.")
-            break
-        except Exception as e:
-            logging.error(f"An error occurred: {e}", exc_info=True)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
-            else:
-                break
-        finally:
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text("</message>")
     
-    # Clean up MCP session and client. Each user requires their own session for token-based authentication.
-    # TODO: Remove per-user sessions once OAuth 2.0 is implemented.
-    try:
-        await session.__aexit__(None, None, None)
-        await client_ctx.__aexit__(None, None, None)
-    except Exception as e:
-        logging.error(f"Error during mcp session and client cleanup: {e}", exc_info=True)
+    async with create_agent(llm=llm, websocket=websocket) as agent:
+        thread_id = str(uuid.uuid4())
+                
+        config = {
+            "thread_id": thread_id,
+        }
+        if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
+            langfuse_handler = CallbackHandler()
+            config["callbacks"] = [langfuse_handler]
+
+        try:
+            while True:
+                try:
+                    request = await websocket.receive_text()
+                    
+                    ws_request = _parse_websocket_request(request)
+                    if ws_request.context:
+                        context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
+                        for key, value in ws_request.context.items():
+                            context_prompt += f"{key}:{value};"
+                        ws_request.prompt += context_prompt
+                    if ws_request.agent:
+                        config["agent"] = ws_request.agent
+                    else:
+                        config["agent"] = ""
+
+                    await stream_agent_response(
+                        agent=agent,
+                        input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
+                        config=config,
+                        websocket=websocket)
+                except WebSocketDisconnect:
+                    logging.info(f"Client {websocket.client.host} disconnected.")
+                    break
+                except Exception as e:
+                    logging.error(f"An error occurred: {e}", exc_info=True)
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+                    else:
+                        break
+                finally:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text("</message>")
+        finally:
+            logging.debug("WebSocket loop ended, context manager will handle cleanup")
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
