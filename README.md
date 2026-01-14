@@ -92,7 +92,7 @@ graph TD
 First, add the Rancher AI Agent Helm repository to your cluster.
 
 ```bash
-helm repo add rancher-ai https://rancher-sandbox.github.io/rancher-ai-agent
+helm repo add rancher-ai https://rancher.github.io/rancher-ai-agent
 ```
 
 2. Update Your Helm Repositories
@@ -153,6 +153,7 @@ namespacedRules:
       verbs:
         - get
 ```
+
 
 
 
