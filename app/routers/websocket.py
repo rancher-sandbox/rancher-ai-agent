@@ -77,7 +77,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
                     if websocket.client_state == WebSocketState.CONNECTED:
                         await websocket.send_text("</message>")
         finally:
-            logging.debug("WebSocket loop ended, context manager will handle cleanup")
+            logging.debug("WebSocket connection ended")
 
 async def stream_agent_response(
     agent: CompiledStateGraph,

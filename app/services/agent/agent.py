@@ -1,8 +1,11 @@
 import os
 import logging
+import json
 from contextlib import asynccontextmanager, AsyncExitStack
+from dataclasses import dataclass
 
 from .child import create_child_agent
+from .parent import create_parent_agent, ChildAgent
 from ..rag import fleet_documentation_retriever, rancher_documentation_retriever
 from fastapi import  WebSocket
 from mcp import ClientSession
@@ -13,6 +16,24 @@ from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_core.language_models.llms import BaseLanguageModel
+
+@dataclass
+class AgentConfig:
+    """Configuration for a child agent."""
+    name: str
+    description: str
+    system_prompt: str
+    mcp_url: str
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AgentConfig':
+        """Create an AgentConfig from a dictionary."""
+        return cls(
+            name=data.get("agent", ""),
+            description=data.get("description", ""),
+            system_prompt=data.get("systemPrompt", ""),
+            mcp_url=data.get("mcpURL", "")
+        )
 
 RANCHER_AGENT_PROMPT = """You are a helpful and expert AI assistant integrated directly into the Rancher UI. Your primary goal is to assist users in managing their Kubernetes clusters and resources through the Rancher interface. You are a trusted partner, providing clear, confident, and safe guidance.
 
@@ -69,26 +90,77 @@ The output should always be provided in Markdown format.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
 
+#TODO this is only for testing. Remove!!
+MULTI_AGENT= """
+[
+  {
+  "agent": "Weather Agent",
+  "description": "Provides weather information for a given location",
+  "systemPrompt": "answer the user",
+  "mcpURL": "http://localhost:8001/mcp"
+  },
+  {
+  "agent": "Math Agent",
+  "description": "Performs mathematical calculations and problem solving",
+  "systemPrompt": "answer the user",
+  "mcpURL": "http://localhost:8002/mcp"
+  }
+]
+"""
+
+def parse_agent_configs(json_str: str) -> list[AgentConfig]:
+    """
+    Parse JSON string into a list of AgentConfig objects.
+    
+    Args:
+        json_str: JSON string containing agent configurations
+    
+    Returns:
+        List of AgentConfig objects
+    """
+    try:
+        data = json.loads(json_str)
+        return [AgentConfig.from_dict(agent_dict) for agent_dict in data]
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse agent configs: {e}")
+        return []
+    except Exception as e:
+        logging.error(f"Error creating agent configs: {e}")
+        return []
+
 @asynccontextmanager
 async def create_agent(llm: BaseLanguageModel, websocket: WebSocket):
-    """ 
-    Async context manager that creates an agent and handles MCP resource cleanup.
-    
-    Usage:
-        async with create_agent(llm, websocket) as agent:
-            # Use agent here
-            pass
-    
-    Yields:
-        CompiledStateGraph: The compiled LangGraph agent ready to process requests
-    """
-    async with AsyncExitStack() as stack:
-        tools = await _create_rancher_core_agent(stack, llm, websocket)
-        agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
-        
-        yield agent
+    agents_config = parse_agent_configs(os.environ.get("AGENTS_CONFIG", MULTI_AGENT))
+    print(agents_config)
+    if len(agents_config) > 0:
+        logging.info("Creating parent agent with child agents: " + ", ".join([agent.name for agent in agents_config]))
+        async with AsyncExitStack() as stack:
+            tools = await _create_rancher_core_mcp_tools(stack, llm, websocket)
+            rancher_agent = ChildAgent(
+                name="Rancher Core Agent",
+                description="Handles Rancher core functionality and Kubernetes resource management",
+                agent=create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
+            )
+            child_agents = []
+            for agent_cfg in agents_config:
+                tools = await _create_mcp_tools(stack, llm, agent_cfg.mcp_url)
+                child_agents.append(ChildAgent(
+                    name=agent_cfg.name,
+                    description=agent_cfg.description,
+                    agent=create_child_agent(llm, tools, agent_cfg.system_prompt, InMemorySaver())
+                ))
+            
+            parent_agent = create_parent_agent(llm, child_agents + [rancher_agent], InMemorySaver())
+            yield parent_agent
+    else:
+        logging.info("single agent" )
+        async with AsyncExitStack() as stack:
+            tools = await _create_rancher_core_mcp_tools(stack, llm, websocket)
+            agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
+            
+            yield agent
 
-async def _create_rancher_core_agent(stack: AsyncExitStack, llm: BaseLanguageModel, websocket: WebSocket) -> list:
+async def _create_rancher_core_mcp_tools(stack: AsyncExitStack, llm: BaseLanguageModel, websocket: WebSocket) -> list:
     """
     Creates a Rancher core agent by connecting to MCP server and loading tools.
     
@@ -122,12 +194,42 @@ async def _create_rancher_core_agent(stack: AsyncExitStack, llm: BaseLanguageMod
     session = await stack.enter_async_context(ClientSession(read, write))
     await session.initialize()
     tools = await load_mcp_tools(session)
-    
+
     # if ENABLE_RAG is true, add the retriever tools to the tools list
     if os.environ.get("ENABLE_RAG", "false").lower() == "true":
         tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
 
     return tools
+
+async def _create_mcp_tools(stack: AsyncExitStack, llm: BaseLanguageModel, mcp_url: str) -> list:
+    """
+    Creates a Rancher core agent by connecting to MCP server and loading tools.
+    
+    Args:
+        stack: AsyncExitStack to manage async context managers
+        llm: The language model to use for the agent
+        websocket: WebSocket connection to extract Rancher URL and authentication token
+    
+    Returns:
+        List of tools loaded from the MCP server
+    """
+
+    read, write, _ = await stack.enter_async_context(
+        streamablehttp_client(
+            url=mcp_url,
+        )
+    )
+    
+    session = await stack.enter_async_context(ClientSession(read, write))
+    await session.initialize()
+    tools = await load_mcp_tools(session)
+
+    # if ENABLE_RAG is true, add the retriever tools to the tools list
+    if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+
+    return tools
+
 
 def _get_system_prompt() -> str:
     """

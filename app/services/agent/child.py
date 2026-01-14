@@ -104,6 +104,7 @@ class ChildAgentBuilder:
         logging.debug("calling model")
 
         messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
+        logging.error(f"messages to LLM: {state["messages"]}")
         response = self._invoke_llm_with_retry(messages, config)
 
         logging.debug("model call finished")
