@@ -4,7 +4,7 @@ import logging
 import json
 
 from ..dependencies import get_llm
-from ..services.agent.agent import create_agent
+from ..services.agent.factory import create_agent
 from dataclasses import dataclass
 from fastapi import APIRouter
 from fastapi import  WebSocket, WebSocketDisconnect, Depends
@@ -59,8 +59,6 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
                         config["agent"] = ws_request.agent
                     else:
                         config["agent"] = ""
-
-                    #input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
 
                     state = agent.get_state(config={"configurable": {"thread_id": thread_id}})
                     if len(state.interrupts) == 1:

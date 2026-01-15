@@ -4,23 +4,15 @@ Parent agent implementation using LangGraph Command primitive for routing to spe
 This module provides a parent agent that uses an LLM to intelligently route user requests
 to the most appropriate specialized child agent based on the request content.
 """
-
-import logging
-from typing import Annotated, Sequence, TypedDict
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool, ToolException
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
-from ollama import ResponseError
 from langgraph.types import Command
-from langgraph.checkpoint.memory import InMemorySaver
-from typing_extensions import TypedDict, Literal
 from langchain_core.callbacks.manager import dispatch_custom_event
 from dataclasses import dataclass
+
+from .base import BaseAgentBuilder, AgentState
 
 @dataclass
 class ChildAgent:
@@ -36,19 +28,8 @@ class ChildAgent:
     description: str
     agent: CompiledStateGraph
 
-class AgentState(TypedDict):
-    """
-    State structure for the parent agent workflow.
-    
-    Attributes:
-        messages: Sequence of conversation messages with automatic message addition
-        summary: Optional summary of the conversation context
-    """
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    summary: str
-    agent_selected : str # TODO do we need it?
 
-class ParentAgentBuilder:
+class ParentAgentBuilder(BaseAgentBuilder):
     """
     Builder class for creating a parent agent that routes requests to specialized child agents.
     
@@ -65,9 +46,8 @@ class ParentAgentBuilder:
             subagents: List of available specialized child agents
             checkpointer: Checkpointer for persisting agent state
         """
-        self.llm = llm
+        super().__init__(llm=llm, tools=[], system_prompt="", checkpointer=checkpointer)
         self.subagents = subagents
-        self.checkpointer = checkpointer
     
     def choose_subagent(self, state: AgentState, config: RunnableConfig):
         """
@@ -115,59 +95,6 @@ class ParentAgentBuilder:
 
         # Return Command to navigate to the selected child agent
         return Command(goto=child_agent)
-    
-    def should_summarize_conversation(self, state: AgentState):
-        """
-        Determines the next step in the agent's workflow.
-
-        This conditional edge checks the last message in the state to decide whether to
-        continue with a tool call, summarize the conversation, or end the execution.
-
-        Args:
-            state: The current state of the agent.
-
-        Returns:
-            A string indicating the next node to transition to: "continue",
-            "summarize_conversation", or "end"."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if not getattr(last_message, "tool_calls", None):
-            if len(messages) > 7: ## TODO check tokens not len messages!
-                return "summarize_conversation"
-            return "end"
-        else:
-            return "continue"
-        
-    def summarize_conversation_node(self, state: AgentState):
-        """
-        Summarizes the conversation history.
-
-        This node is invoked when the conversation becomes too long. It asks the LLM
-        to create or extend a summary of the conversation, then replaces the
-        previous messages with the new summary to keep the context concise.
-
-        Args:
-            state: The current state of the agent, containing messages and an optional summary.
-
-        Returns:
-            A dictionary with the updated summary and a condensed list of messages."""
-        summary = state.get("summary", "")
-        if summary:
-            summary_message = (
-                f"This is summary of the conversation to date: {summary}\n"
-                "Extend the summary by taking into account the new messages above:" )
-        else:
-            summary_message = "Create a summary of the conversation above:"
-
-        messages = state["messages"] + [HumanMessage(content=summary_message)]
-        response = self.llm.invoke(messages)
-        new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
-        new_messages = new_messages + [response]
-
-        logging.debug("summarizing conversation")
-        
-        return {"summary": response.content, "messages": new_messages}
-
 
     def build(self) -> CompiledStateGraph:
         """
