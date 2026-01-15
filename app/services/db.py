@@ -62,7 +62,7 @@ class DatabaseManager:
         """
         async with AsyncPostgresSaver.from_conn_string(self.db_url) as checkpointer:
             chat_list = []
-            async for checkpoint_tuple in checkpointer.alist(config=None, filter={"user_id": user_id}):           
+            async for checkpoint_tuple in checkpointer.alist(config=None, filter={"user_id": user_id}):
                 chat_id = checkpoint_tuple.config["configurable"]["thread_id"]
                 user_id = checkpoint_tuple.metadata["user_id"]
                 

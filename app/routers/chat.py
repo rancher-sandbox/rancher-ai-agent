@@ -50,8 +50,7 @@ async def get_chats(request: Request):
             status_code=status.HTTP_200_OK,
             content=chats
         )
-    except HTTPException:
-        raise
+
     except Exception as e:
         logging.error(f"Error fetching chats for user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -76,8 +75,6 @@ async def delete_chats(request: Request) -> JSONResponse:
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    except HTTPException:
-        raise
     except Exception as e:
         logging.error(f"Error deleting chats for user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -114,8 +111,7 @@ async def get_chat(request: Request, chat_id: str) -> JSONResponse:
             status_code=status.HTTP_200_OK,
             content=chat
         )
-    except HTTPException:
-        raise
+
     except Exception as e:
         logging.error(f"Error fetching chat for chat_id {chat_id} and user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -159,8 +155,7 @@ async def update_chat(request: Request, chat_id: str, chat_data: dict) -> JSONRe
             status_code=status.HTTP_200_OK,
             content=updated_chat
         )
-    except HTTPException:
-        raise
+
     except Exception as e:
         logging.error(f"Error updating chat for chat_id {chat_id} and user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -192,8 +187,6 @@ async def delete_chat(request: Request, chat_id: str) -> JSONResponse:
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    except HTTPException:
-        raise
     except Exception as e:
         logging.error(f"Error deleting chat for chat_id {chat_id} and user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -234,8 +227,7 @@ async def get_chat_messages(request: Request, chat_id: str) -> JSONResponse:
             status_code=status.HTTP_200_OK,
             content=messages
         )
-    except HTTPException:
-        raise
+
     except Exception as e:
         logging.error(f"Error fetching messages for chat_id {chat_id} and user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
