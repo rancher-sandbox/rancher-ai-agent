@@ -1,0 +1,16 @@
+{{- if .Values.dbManager.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: rancher-ai-postgres-pv
+  namespace: cattle-ai-agent-system
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data/rancher-ai-postgres"
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+{{- end }}

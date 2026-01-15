@@ -11,10 +11,22 @@ from langgraph.graph.state import CompiledStateGraph
 from langfuse.langchain import CallbackHandler
 from langchain_core.language_models.llms import BaseLanguageModel
 
+from ..services.auth import get_user_id
 from ..dependencies import get_llm
 from ..services.agent.agent import create_agent
+from ..types import RequestType
 
 router = APIRouter()
+
+async def get_user_id_from_websocket(websocket: WebSocket) -> str:
+    """
+    Retrieves the user ID from the Rancher API using the session token from the WebSocket cookies.
+    """
+    cookies = websocket.cookies
+    rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
+    token = os.environ.get("RANCHER_API_TOKEN", cookies.get("R_SESS", ""))
+
+    return await get_user_id(rancher_url, token)
 
 @dataclass
 class WebSocketRequest:
@@ -25,22 +37,34 @@ class WebSocketRequest:
     agent: str = ""
 
 @router.websocket("/agent/ws/messages")
-async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depends(get_llm)):
+@router.websocket("/agent/ws/messages/{thread_id}")
+async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: BaseLanguageModel = Depends(get_llm)):
     """
     WebSocket endpoint for the agent.
     
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-    await websocket.accept()
-    logging.debug("ws connection opened")
     
-    async with create_agent(llm=llm, websocket=websocket) as ctx:
+    user_id = await get_user_id_from_websocket(websocket)
+    
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+    logging.debug(f"Starting websocket session with thread_id: {thread_id}, user_id: {user_id}")
+    
+    await websocket.accept()
+    logging.debug("ws/messages connection opened")
+    
+    await websocket.send_text(f'<chat-metadata>{{"chatId": "{thread_id}"}}</chat-metadata>')
+
+    async with create_agent(llm=llm, websocket=websocket, request_type=RequestType.MESSAGE) as ctx:
         agent = ctx.agent
 
-        thread_id = str(uuid.uuid4())
         config = {
-            "configurable": {"thread_id": thread_id},
+            "configurable": {
+                "thread_id": thread_id,
+                "user_id": user_id,
+            },
         }
 
         if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
@@ -50,26 +74,44 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
         while True:
             try:
                 request = await websocket.receive_text()
+                request_id = str(uuid.uuid4())
                 
                 ws_request = _parse_websocket_request(request)
+                content = ws_request.prompt
                 if ws_request.context:
                     context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
                     for key, value in ws_request.context.items():
                         context_prompt += f"{key}:{value};"
-                    ws_request.prompt += context_prompt
+                    content += context_prompt
+
+                config["configurable"]["request_id"] = request_id
 
                 if ws_request.agent:
                     config["configurable"]["agent"] = ws_request.agent
                 else:
                     config["configurable"]["agent"] = ""
 
+                input_messages = [{"role": "user", "content": content}]
+
+                input_data = {
+                    "messages": input_messages,
+                    "agent_metadata": {
+                        "prompt": ws_request.prompt,
+                        "context": ws_request.context,
+                        "tags": ws_request.tags,
+                        "mcp_responses": [],
+                    },
+                }
+
                 await stream_agent_response(
                     agent=agent,
-                    input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
+                    input_data=input_data,
                     config=config,
                     websocket=websocket)
+                
             except WebSocketDisconnect:
                 logging.info(f"Client {websocket.client.host} disconnected.")
+
                 break
             except Exception as e:
                 logging.error(f"An error occurred: {e}", exc_info=True)
@@ -103,6 +145,9 @@ async def stream_agent_response(
     """
 
     await websocket.send_text("<message>")
+
+    mcp_responses = []
+    
     async for stream in agent.astream_events(
         input_data,
         config=config,
@@ -114,6 +159,7 @@ async def stream_agent_response(
         
         if stream["event"] == "on_custom_event":
             await websocket.send_text(stream["data"])
+            mcp_responses.append(stream["data"])
     
         if stream["event"] == "on_chain_stream":
             data = stream.get("data")
@@ -126,6 +172,14 @@ async def stream_agent_response(
                             interrupt_value = interrupts[0].value
                             if interrupt_value:
                                 await websocket.send_text(interrupt_value)
+
+    if mcp_responses:
+        input_data["agent_metadata"]["mcp_responses"] = mcp_responses
+        # Invoke agent to persist MCP responses across checkpoints
+        await agent.ainvoke(
+            {"agent_metadata": input_data["agent_metadata"]},
+            config=config,
+        )
     
 def _extract_text_from_chunk_content(chunk_content: any) -> str:
     """
@@ -168,8 +222,8 @@ def _parse_websocket_request(request: str) -> WebSocketRequest:
         return WebSocketRequest(
             prompt=json_request.get("prompt", ""),
             context=json_request.get("context", {}),
-            tags = json_request.get("tags", None),
+            tags = json_request.get("tags", []),
             agent=json_request.get("agent", "")
         )
     except json.JSONDecodeError:
-        return WebSocketRequest(prompt=request, context={}, tags=None, agent="")
+        return WebSocketRequest(prompt=request, context={}, tags=[], agent="")

@@ -1,0 +1,297 @@
+openapi: 3.0.3
+info:
+  title: Rancher AI Chat API
+  description: API for managing chats and messages with tag-based filtering
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: http://0.0.0.0:8080
+    description: Production server
+
+paths:
+  /chats:
+    get:
+      summary: List all chats for the current user
+      description: Retrieves all chats belonging to the authenticated user with optional tag filtering
+      operationId: list_chats
+      tags:
+        - Chats
+      parameters:
+        - name: include-tag
+          in: query
+          description: Select chats that have at least one message with these tags
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          example: ["urgent", "welcome"]
+        - name: exclude-tag
+          in: query
+          description: Select chats that have at least one message without these tags
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          example: ["draft"]
+      responses:
+        '200':
+          description: List of chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Chat'
+        '400':
+          description: User not found or authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete all chats for the current user
+      description: Deletes all chats and associated messages for the authenticated user
+      operationId: delete_chats
+      tags:
+        - Chats
+      responses:
+        '204':
+          description: All chats deleted successfully
+        '400':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No chats found to delete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chats/{id}:
+    delete:
+      summary: Delete a specific chat
+      description: Deletes a specific chat and all associated messages. Only the chat owner can delete it.
+      operationId: delete_chat
+      tags:
+        - Chats
+      parameters:
+        - name: id
+          in: path
+          description: The unique identifier of the chat to delete
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: ad924baf-24d7-49a5-84ae-bba3a58218a6
+      responses:
+        '204':
+          description: Chat deleted successfully
+        '400':
+          description: User not found or chat id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found or user is not the owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chats/{id}/messages:
+    get:
+      summary: List messages in a chat
+      description: Retrieves all messages for a specific chat, grouped by request ID and sorted chronologically with optional tag filtering
+      operationId: list_messages
+      tags:
+        - Messages
+      parameters:
+        - name: id
+          in: path
+          description: The unique identifier of the chat
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: ad924baf-24d7-49a5-84ae-bba3a58218a6
+        - name: include-tag
+          in: query
+          description: Select also messages that have these tags
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          example: ["important"]
+        - name: exclude-tag
+          in: query
+          description: Select only messages that do not have these tags
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          example: ["archived", "spam"]
+      responses:
+        '200':
+          description: List of messages grouped by request ID
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '400':
+          description: User not found or id missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Chat:
+      type: object
+      description: A chat session
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the chat
+        name:
+          type: string
+          description: Display name of the chat
+        createdAt:
+          type: integer
+          description: Unix timestamp of when the chat was created
+      required:
+        - id
+        - createdAt
+      example:
+        id: ad924baf-24d7-49a5-84ae-bba3a58218a6
+        userId: PIPPO
+        name: Chat 1
+        createdAt: 1767638974
+
+    ChatResponse:
+      type: object
+      description: Response when creating a chat
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the chat
+        userId:
+          type: string
+          description: ID of the user who owns the chat
+        name:
+          type: string
+          description: Display name of the chat
+        created_at:
+          type: integer
+          description: Unix timestamp of when the chat was created
+      required:
+        - id
+        - userId
+        - name
+        - created_at
+      example:
+        id: ad924baf-24d7-49a5-84ae-bba3a58218a6
+        userId: PIPPO
+        name: My New Chat
+        created_at: 1767638974
+
+    Message:
+      type: object
+      description: A message in a chat
+      properties:
+        chatId:
+          type: string
+          format: uuid
+          description: Unique identifier of the chat containing this message
+        requestId:
+          type: string
+          format: uuid
+          description: Unique identifier of the request/conversation turn
+        role:
+          type: string
+          enum:
+            - user
+            - llm
+            - mcp
+            - agent
+          description: Role of who sent the message. 'agent' is aggregated response from llm/mcp
+        message:
+          type: string
+          description: The message content. For agent role, multiple messages are concatenated with newlines
+        context:
+          oneOf:
+            - type: object
+              description: Additional context data as JSON object
+            - type: string
+              description: Empty string for agent messages
+        tags:
+          oneOf:
+            - type: string
+              description: JSON array string of tags
+              example: '["urgent", "bug"]'
+            - type: object
+              description: Tags as JSON object
+        createdAt:
+          type: integer
+          description: Unix timestamp of when the message was created
+      required:
+        - chatId
+        - requestId
+        - role
+        - message
+        - context
+        - tags
+        - createdAt
+      example:
+        chatId: ad924baf-24d7-49a5-84ae-bba3a58218a6
+        requestId: 7b38fea1-d993-4525-8217-05087df34d84
+        role: user
+        message: Chat 1 - Message 1
+        context: "{}"
+        tags: "[]"
+        createdAt: 1767638974
+
+    Error:
+      type: object
+      description: Error response
+      properties:
+        message:
+          type: string
+          description: Error message
+      required:
+        - message
+      example:
+        message: userId not found
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: R_SESS
+      description: Rancher session cookie for authentication
+
+security:
+  - cookieAuth: []
+
+tags:
+  - name: Chats
+    description: Chat management operations
+  - name: Messages
+    description: Message retrieval and filtering

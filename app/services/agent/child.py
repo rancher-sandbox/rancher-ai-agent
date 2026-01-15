@@ -1,8 +1,9 @@
 import json
 import logging
-import langgraph.types 
+import langgraph.types
 
-from typing import Annotated, Sequence, TypedDict
+from datetime import datetime
+from typing import Annotated, Sequence, TypedDict, NotRequired
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from langchain_core.messages import ToolMessage, HumanMessage, RemoveMessage, SystemMessage
@@ -14,12 +15,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
 from langchain_core.callbacks.manager import dispatch_custom_event
 
-INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
+from .types import AgentState as ChildAgentState
 
-class ChildAgentState(TypedDict):
-    """The state of the agent."""
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    summary: str
+INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
 class ChildAgentBuilder:
     def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):

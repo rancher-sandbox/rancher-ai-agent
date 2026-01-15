@@ -1,0 +1,16 @@
+{{- if .Values.dbManager.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rancher-ai-postgres-pvc
+  namespace: cattle-ai-agent-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.db.postgres.persistence.size }}
+  {{- if .Values.db.postgres.persistence.storageClass }}
+  storageClassName: {{ .Values.db.postgres.persistence.storageClass }}
+  {{- end }}
+{{- end }}

@@ -54,4 +54,4 @@ RUN uv pip install --system -r pyproject.toml
 COPY --from=docs-builder /rancher_docs /rancher_docs
 COPY --from=docs-builder /fleet_docs /fleet_docs
 
-CMD ["fastapi", "run", "src/main.py"]
+CMD ["fastapi", "run", "app/main.py"]

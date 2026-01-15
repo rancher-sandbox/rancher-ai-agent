@@ -1,0 +1,15 @@
+{{- if .Values.dbManager.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: rancher-ai-db
+  namespace: cattle-ai-agent-system
+spec:
+  type: {{ .Values.db.service.type }}
+  selector:
+    app: rancher-ai-db
+  ports:
+    - port: {{ .Values.db.service.port }}
+      targetPort: 5432
+      name: postgres
+{{- end }}

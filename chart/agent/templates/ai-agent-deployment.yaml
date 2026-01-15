@@ -33,6 +33,12 @@ spec:
           claimName: "{{ .Values.rag.pvc }}"
       {{- end }}
       {{- end }}
+      {{- if .Values.dbManager.enabled }}
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h rancher-ai-db -p 5432; do echo waiting for db; sleep 2; done;']
+      {{- end }}
       containers:
       - image: "{{ .Values.aiAgent.image.repository }}:{{ .Values.aiAgent.image.tag }}"
         imagePullPolicy: "{{ .Values.aiAgent.image.pullPolicy }}"
@@ -158,6 +164,18 @@ spec:
                 name: llm-config
                 key: AWS_ACCESS_KEY_ID
                 optional: true
+          - name: DB_MANAGER_ENABLED
+            value: "{{ .Values.dbManager.enabled }}"
+          - name: DB_HOST
+            value: rancher-ai-db
+          - name: DB_PORT
+            value: "5432"
+          - name: DB_USER
+            value: "{{ .Values.db.postgres.user }}"
+          - name: DB_PASSWORD
+            value: "{{ .Values.db.postgres.password }}"
+          - name: DB_NAME
+            value: "{{ .Values.db.postgres.name }}"
           - name: LOG_LEVEL
             value: "{{ .Values.log.level }}"
           - name: INSECURE_SKIP_TLS
