@@ -121,6 +121,14 @@ helm install rancher-ai-agent rancher-ai/agent \
 ## Accessing the UI
 Once the agent is installed, you need to install the UI extension
 
+## Chat History
+The AI Assistant maintains persistent chat history with REST API endpoints for accessing and managing conversations:
+- `GET /api/chats` - List all chat sessions
+- `GET /api/chats/{id}/messages` - Retrieve all messages for a specific chat session
+- `DELETE /api/chats/{id}` - Delete a specific chat session
+
+See the [OpenAPI spec](openapi.yaml) for full API details.
+
 ## RBAC
 
 To use the AI agent a user needs get permission to the 'llm-config' secret and the 'http:rancher-ai-agent:80' services/proxy.
