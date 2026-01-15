@@ -46,6 +46,7 @@ class AgentState(TypedDict):
     """
     messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
+    agent_selected : str # TODO do we need it?
 
 class ParentAgentBuilder:
     """
@@ -90,6 +91,7 @@ class ParentAgentBuilder:
                 "subagent_choice_event",
                 f"_DEBUG MESSAGE: Using UI-specified agent: {agent_override}_ \n",
             )
+            self.agent_selected = agent_override
             return Command(goto=agent_override)
         
         messages = state["messages"]
@@ -102,15 +104,17 @@ class ParentAgentBuilder:
         llm_route_prompt += f"\nUser's request: {messages[-1].content}"
         
         # Use LLM to select the appropriate child agent
-        subagent = self.llm.invoke(llm_route_prompt).content
+        child_agent = self.llm.invoke(llm_route_prompt).content
+
+        self.agent_selected = child_agent
 
         dispatch_custom_event(
             "subagent_choice_event",
-            f"_DEBUG MESSAGE: LLM selected: {subagent}_ \n",
+            f"_DEBUG MESSAGE: LLM selected: {child_agent}_ \n",
         )
 
         # Return Command to navigate to the selected child agent
-        return Command(goto=subagent)
+        return Command(goto=child_agent)
     
     def should_summarize_conversation(self, state: AgentState):
         """
@@ -127,7 +131,7 @@ class ParentAgentBuilder:
             "summarize_conversation", or "end"."""
         messages = state["messages"]
         last_message = messages[-1]
-        if not last_message.tool_calls:
+        if not getattr(last_message, "tool_calls", None):
             if len(messages) > 7: ## TODO check tokens not len messages!
                 return "summarize_conversation"
             return "end"

@@ -22,16 +22,18 @@ class ChildAgentState(TypedDict):
     summary: str
 
 class ChildAgentBuilder:
-    def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
+    def __init__(self, standalone: bool, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
         """
         Initializes the ChildAgentBuilder.
 
         Args:
+            standalone: Whether the agent runs without parent.
             llm: The language model to use for the agent's decisions.
             tools: A list of tools the agent can use.
             system_prompt: The initial system-level instructions for the agent.
             checkpointer: The checkpointer for persisting agent state.
         """
+        self.standalone = standalone
         self.llm = llm
         self.tools = tools
         self.system_prompt = system_prompt
@@ -104,7 +106,6 @@ class ChildAgentBuilder:
         logging.debug("calling model")
 
         messages = [SystemMessage(content=self.system_prompt)] + state["messages"]
-        logging.error(f"messages to LLM: {state["messages"]}")
         response = self._invoke_llm_with_retry(messages, config)
 
         logging.debug("model call finished")
@@ -176,6 +177,12 @@ class ChildAgentBuilder:
         else:
             return "continue"
         
+    def should_continue(self, state: ChildAgentState):
+        last_message = state['messages'][-1]
+        if not last_message.tool_calls:
+            return "end"
+        return "continue"
+        
     def should_continue_after_interrupt(self, state: ChildAgentState):
         """
         Determines whether to continue execution after a tool interruption.
@@ -208,17 +215,31 @@ class ChildAgentBuilder:
         workflow = StateGraph(ChildAgentState)
         workflow.add_node("agent", self.call_model_node)
         workflow.add_node("tools", self.tool_node)
-        workflow.add_node("summarize_conversation", self.summarize_conversation_node)
-        workflow.set_entry_point("agent")
-        workflow.add_conditional_edges(
-            "agent",
-            self.should_summarize_conversation,
-            {
-                "continue": "tools",
-                "summarize_conversation": "summarize_conversation",
-                "end": END,
-            },
-        )
+
+        if self.standalone:
+            # summarization is only needed in standalone mode because it is doing in the parent otherwise
+            workflow.add_node("summarize_conversation", self.summarize_conversation_node)
+            workflow.add_conditional_edges(
+                "agent",
+                self.should_summarize_conversation,
+                {
+                    "continue": "tools",
+                    "summarize_conversation": "summarize_conversation",
+                    "end": END,
+                },
+            )
+            workflow.add_edge("summarize_conversation", END)
+
+        else:
+            workflow.add_conditional_edges(
+                "agent",
+                self.should_continue,
+                {
+                    "continue": "tools",
+                    "end": END
+                }
+            )
+
         workflow.add_conditional_edges(
             "tools",
             self.should_continue_after_interrupt,
@@ -227,7 +248,7 @@ class ChildAgentBuilder:
                 "end": END,
             },
         )
-        workflow.add_edge("summarize_conversation", END)
+        workflow.set_entry_point("agent")
 
         return workflow.compile(checkpointer=self.checkpointer)
 
@@ -246,7 +267,26 @@ def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt:
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-    builder = ChildAgentBuilder(llm, tools, system_prompt, checkpointer)
+    builder = ChildAgentBuilder(False, llm, tools, system_prompt, checkpointer)
+
+    return builder.build()
+
+def create_standalone_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
+    """
+    Creates a LangGraph agent capable of interacting with Rancher and Kubernetes resources.
+    
+    This factory function instantiates the AgentBuilder, builds the agent graph,
+    and returns the compiled agent.
+    
+    Args:
+        llm: The language model to use for the agent's decisions.
+        tools: A list of tools the agent can use (e.g., to interact with K8s).
+        system_prompt: The initial system-level instructions for the agent.
+    
+    Returns:
+        A compiled LangGraph StateGraph ready to be invoked.
+    """
+    builder = ChildAgentBuilder(True, llm, tools, system_prompt, checkpointer)
 
     return builder.build()
 
@@ -297,23 +337,11 @@ def _should_interrupt(tool_call: any) -> str:
         return _create_confirmation_response(tool_call['args']['resource'], "create", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
     return ""
 
-def _extract_interrupt_message(interrupt_message:any) -> str: 
-    """
-    Extracts the user's response from an interrupt.
-
-    The response from the UI might be a simple string or a JSON object.
-    This function standardizes the extraction of the user's actual response.
-    """
-    try:
-        json_response = json.loads(interrupt_message["response"])
-        return json_response["prompt"]
-    except Exception:
-        return interrupt_message["response"]
     
 def _handle_interrupt(tool_call: dict) -> bool:
     """Handles the user confirmation interrupt for a tool call."""
     if interrupt_message := _should_interrupt(tool_call):
-        response = _extract_interrupt_message(langgraph.types.interrupt(interrupt_message))
+        response = langgraph.types.interrupt(interrupt_message)
         if response != "yes":
             return False
           

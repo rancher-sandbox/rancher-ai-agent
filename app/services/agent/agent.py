@@ -131,7 +131,6 @@ def parse_agent_configs(json_str: str) -> list[AgentConfig]:
 @asynccontextmanager
 async def create_agent(llm: BaseLanguageModel, websocket: WebSocket):
     agents_config = parse_agent_configs(os.environ.get("AGENTS_CONFIG", MULTI_AGENT))
-    print(agents_config)
     if len(agents_config) > 0:
         logging.info("Creating parent agent with child agents: " + ", ".join([agent.name for agent in agents_config]))
         async with AsyncExitStack() as stack:

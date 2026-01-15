@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 from langgraph.graph.state import CompiledStateGraph
 from langfuse.langchain import CallbackHandler
 from langchain_core.language_models.llms import BaseLanguageModel
+from langgraph.types import  Command
 
 router = APIRouter()
 
@@ -59,9 +60,17 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
                     else:
                         config["agent"] = ""
 
+                    #input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
+
+                    state = agent.get_state(config={"configurable": {"thread_id": thread_id}})
+                    if len(state.interrupts) == 1:
+                        input_data = Command(resume=ws_request.prompt)
+                    else:
+                        input_data = {"messages": [{"role": "user", "content": ws_request.prompt}]}
+                    
                     await stream_agent_response(
                         agent=agent,
-                        input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
+                        input_data=input_data,
                         config=config,
                         websocket=websocket)
                 except WebSocketDisconnect:
@@ -81,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
-    input_data: dict[str, list[dict[str, str]]],
+    input_data: any, #dict[str, list[dict[str, str]]],
     config: dict,
     websocket: WebSocket,
 ) -> None:
