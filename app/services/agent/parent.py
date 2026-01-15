@@ -10,8 +10,8 @@ from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.types import Command
 from langchain_core.callbacks.manager import dispatch_custom_event
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from dataclasses import dataclass
-
 from .base import BaseAgentBuilder, AgentState
 
 @dataclass
@@ -37,19 +37,19 @@ class ParentAgentBuilder(BaseAgentBuilder):
     most appropriate child agent using LangGraph's Command primitive for navigation.
     """
     
-    def __init__(self, llm: BaseChatModel, subagents: list[ChildAgent], checkpointer: Checkpointer):
+    def __init__(self, llm: BaseChatModel, child_agents: list[ChildAgent], checkpointer: Checkpointer):
         """
         Initialize the parent agent builder.
         
         Args:
             llm: Language model used for routing decisions
-            subagents: List of available specialized child agents
+            child_agents: List of available specialized child agents
             checkpointer: Checkpointer for persisting agent state
         """
         super().__init__(llm=llm, tools=[], system_prompt="", checkpointer=checkpointer)
-        self.subagents = subagents
+        self.child_agents = child_agents
     
-    def choose_subagent(self, state: AgentState, config: RunnableConfig):
+    def choose_child_agent(self, state: AgentState, config: RunnableConfig):
         """
         Route the user request to the most appropriate child agent.
         
@@ -73,18 +73,20 @@ class ParentAgentBuilder(BaseAgentBuilder):
             )
             self.agent_selected = agent_override
             return Command(goto=agent_override)
-        
+
         messages = state["messages"]
 
         # Build routing prompt with available child agents and their descriptions
-        llm_route_prompt = "Based on the user request, decide which child agent is best suited to handle the user's request. Respond with only the name of the child agent.\n\n"
-        llm_route_prompt += "Available child agents:\n"
-        for sa in self.subagents:
-            llm_route_prompt += f"- {sa.name}: {sa.description}\n"
-        llm_route_prompt += f"\nUser's request: {messages[-1].content}"
+        router_prompt = "Based on the user request, decide which child agent is best suited to handle the user's request. Respond with only the name of the child agent.\n\n"
+        router_prompt += "Available child agents:\n"
+        for child in self.child_agents:
+            router_prompt += f"- {child.name}: {child.description}\n"
+        router_prompt += f"\nUser's request: {messages[-1].content}"
+                
+        user_and_ai_messages = [msg for msg in messages if isinstance(msg, (HumanMessage, AIMessage))]
         
         # Use LLM to select the appropriate child agent
-        child_agent = self.llm.invoke(llm_route_prompt).content
+        child_agent = self.llm.invoke([SystemMessage(content=router_prompt)] + user_and_ai_messages).content
 
         self.agent_selected = child_agent
 
@@ -108,14 +110,14 @@ class ParentAgentBuilder(BaseAgentBuilder):
         """
         workflow = StateGraph(AgentState)
         
-        workflow.add_node("choose_subagent", self.choose_subagent)
+        workflow.add_node("choose_child_agent", self.choose_child_agent)
         workflow.add_node("summarize_conversation", self.summarize_conversation_node)
 
         # Add a node for each child agent
-        for sa in self.subagents:
-            workflow.add_node(sa.name, sa.agent)
+        for child in self.child_agents:
+            workflow.add_node(child.name, child.agent)
             workflow.add_conditional_edges(
-            sa.name,
+            child.name,
             self.should_summarize_conversation,
             {
                 "summarize_conversation": "summarize_conversation",
@@ -125,22 +127,22 @@ class ParentAgentBuilder(BaseAgentBuilder):
 
         
         # Set the routing node as the entry point
-        workflow.set_entry_point("choose_subagent")
+        workflow.set_entry_point("choose_child_agent")
 
         return workflow.compile(checkpointer=self.checkpointer)
 
-def create_parent_agent(llm: BaseChatModel, subagents: list[ChildAgent], checkpointer: Checkpointer) -> CompiledStateGraph:
+def create_parent_agent(llm: BaseChatModel, child_agents: list[ChildAgent], checkpointer: Checkpointer) -> CompiledStateGraph:
     """
     Factory function to create a parent agent with routing capabilities.
     
     Args:
         llm: Language model for routing decisions
-        subagents: List of specialized child agents to route between
+        child_agents: List of specialized child agents to route between
         checkpointer: Checkpointer for state persistence
         
     Returns:
         Compiled parent agent ready to route requests to child agents
     """
-    builder = ParentAgentBuilder(llm, subagents, checkpointer)
+    builder = ParentAgentBuilder(llm, child_agents, checkpointer)
 
     return builder.build()
