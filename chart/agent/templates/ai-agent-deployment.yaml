@@ -159,9 +159,9 @@ spec:
                 key: AWS_ACCESS_KEY_ID
                 optional: true
           - name: DB_ENABLED
-            value: "{{ .Values.persistence.enabled }}"
+            value: "{{ .Values.storage.enabled }}"
           - name: DB_CONNECTION_STRING
-            value: "{{ .Values.persistence.dbConnectionString }}"
+            value: "{{ .Values.storage.connectionString }}"
           - name: LOG_LEVEL
             value: "{{ .Values.log.level }}"
           - name: INSECURE_SKIP_TLS

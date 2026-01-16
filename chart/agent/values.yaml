@@ -32,9 +32,9 @@ rag:
 langfuseSecretKey:
 langfusePublicKey:
 langfuseHost:
-persistence:
+storage:
   enabled: false
-  dbConnectionString: ""
+  connectionString: ""
 insecureSkipTls: false
 llmMock:
   enabled: false
