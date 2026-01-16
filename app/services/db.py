@@ -2,6 +2,8 @@ import os
 import logging
 from datetime import datetime
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.base import CheckpointTuple
+
 from .agent.agent import create_rest_api_agent
 
 class DatabaseManager:
@@ -30,7 +32,7 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Failed to initialize database: {e}", exc_info=True)
             
-    def filter_by_tags(self, tag_filters: list[dict], tags: list, role: str) -> bool:
+    def _filter_by_tags(self, tag_filters: list[dict], tags: list, role: str) -> bool:
         """
         TODO: add custom tag filtering logic here.
         Check if any of the tags are in the excluded tags list.
@@ -48,6 +50,53 @@ class DatabaseManager:
                     if tag_role == role and tag in excluded_tags:
                         return False
         return True
+    
+    def _is_empty_chat(self, checkpoint_tuple: CheckpointTuple) -> bool:
+        """
+        Check if a chat is empty from the checkpoint tuple.
+        A chat is considered empty if it does not contain any messages other than those with 'welcome' tag.
+        """
+        tag_filters = [
+            { "human": ["welcome"] },
+            { "ai": ["welcome"] },
+        ]
+        
+        channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+        agent_metatdata = channel_values.get("agent_metadata", {})
+        messages = channel_values.get("messages", [])
+        tags = agent_metatdata.get("tags", [])
+
+        is_empty = True
+        for msg in messages:
+            if self._filter_by_tags(tag_filters, tags, msg.type):
+                is_empty = False
+                break
+            
+        return is_empty
+    
+    def _get_chat_metadata(self, checkpointTuple: CheckpointTuple) -> dict:
+        """
+        Extract chat metadata from a checkpoint tuple.
+        """
+        channel_values = checkpointTuple.checkpoint.get("channel_values", {})
+        messages = channel_values.get("messages", [])
+
+        name = ""
+        created_at = None
+
+        if messages and len(messages) > 0:
+            # First message is used for chat metadata
+            message = messages[0]
+
+            additional_kwargs = message.additional_kwargs
+            created_at = additional_kwargs.get("created_at") if additional_kwargs else None
+            if created_at:
+                name = f"Chat - {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M')}"
+
+        return {
+            "name": name,
+            "created_at": created_at
+        }
 
     async def fetch_chats(self, user_id: str, filters: dict = {}) -> list:
         """
@@ -62,13 +111,20 @@ class DatabaseManager:
         """
         async with AsyncPostgresSaver.from_conn_string(self.db_url) as checkpointer:
             chat_list = []
+
+            chat_ids = set()
             async for checkpoint_tuple in checkpointer.alist(config=None, filter={"user_id": user_id}):
                 chat_id = checkpoint_tuple.config["configurable"]["thread_id"]
                 user_id = checkpoint_tuple.metadata["user_id"]
                 
                 logging.debug(f"Processing checkpoint_tuple for chat_id: {chat_id}, user_id: {user_id}")
-                
-                if not any(chat["id"] == chat_id for chat in chat_list):
+
+                if self._is_empty_chat(checkpoint_tuple):
+                    logging.debug(f"Chat_id: {chat_id}, user_id: {user_id} is empty, skipping")
+                    continue
+
+                if chat_id not in chat_ids:
+                    chat_ids.add(chat_id)
                     chat_list.append({
                         "id": chat_id,
                         "userId": user_id
@@ -76,18 +132,14 @@ class DatabaseManager:
 
             rows = []
             for chat in chat_list:
-                messages = await self.fetch_messages(chat_id=chat["id"], user_id=chat["userId"])
-                if messages and len(messages) > 0:
-                    # createAt is the timestamp of the first message in the chat
-                    created_at = messages[0]["createdAt"]
-                    
-                    row = {
-                        "id": chat["id"],
-                        "userId": chat["userId"],
-                        "name": f"Chat - {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M')}",
-                        "createdAt": created_at
-                    }
-                    rows.append(row)
+                chat_metadata = self._get_chat_metadata(checkpoint_tuple)
+                row = {
+                    "id": chat["id"],
+                    "userId": chat["userId"],
+                    "name": chat_metadata.get("name"),
+                    "createdAt": chat_metadata.get("created_at"),
+                }
+                rows.append(row)
         return rows
     
     async def fetch_chat(self, chat_id: str, user_id: str) -> dict | None:
@@ -105,17 +157,19 @@ class DatabaseManager:
             checkpoint_tuple = await checkpointer.aget_tuple(config=config)
             if checkpoint_tuple and checkpoint_tuple.metadata.get("user_id") == user_id:
                 logging.debug(f"Found checkpoint_tuple for chat_id: {chat_id}, user_id: {user_id}")
-        
-                messages = await self.fetch_messages(chat_id=chat_id, user_id=user_id)
-                if messages and len(messages) > 0:
-                    created_at = messages[0]["createdAt"]
-                    chat = {
-                        "id": chat_id,
-                        "userId": user_id,
-                        "name": f"Chat - {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M')}",
-                        "createdAt": created_at,
-                    }
-                    return chat
+
+                if self._is_empty_chat(checkpoint_tuple):
+                    logging.debug(f"Chat_id: {chat_id}, user_id: {user_id} is empty, skipping")
+                    return None
+
+                chat_metadata = self._get_chat_metadata(checkpoint_tuple)
+                chat = {
+                    "id": chat_id,
+                    "userId": user_id,
+                    "name": chat_metadata.get("name"),
+                    "createdAt": chat_metadata.get("created_at"),
+                }
+                return chat
         return None
     
     async def delete_chats(self, user_id: str) -> None:
@@ -166,7 +220,7 @@ class DatabaseManager:
             if checkpoint_tuple and checkpoint_tuple.metadata.get("user_id") == user_id:
                 await checkpointer.adelete_thread(chat_id)
                 logging.debug(f"Deleted thread: {chat_id}, user_id: {user_id}")
-            
+
     async def fetch_messages(self, chat_id: str, user_id: str, filters: dict = {}) -> list:
         """
         TODO: implement tags filtering logic.
@@ -187,14 +241,15 @@ class DatabaseManager:
             # Filter by chat_id
             config = {"configurable": {"thread_id": chat_id}}
             
-            EXCLUDED_TAGS_DEFAULT = [
+            limit = filters.get("limit")
+            defaut_tag_filters = [
                 { "human": ["welcome", "confirmation"] },
                 { "ai": ["welcome"] },
             ]
             
             # Collect states grouped by request_id in reverse order
             states_list = []
-            async for state in agent.aget_state_history(config):
+            async for state in agent.aget_state_history(config, filter={"user_id": user_id}):
                 # Filter by user_id
                 if state.metadata.get("user_id") == user_id:
                     states_list.append(state)
@@ -232,7 +287,7 @@ class DatabaseManager:
                     messages = [m for m in state.values.get("messages", []) if hasattr(m, "id") and m.id not in processed_message_ids]
 
                     for msg in messages:
-                        if msg.type == 'human' and self.filter_by_tags(EXCLUDED_TAGS_DEFAULT, tags, msg.type):
+                        if msg.type == 'human' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
                             if user_row is None:
                                 text = agent_metadata.get("prompt", "")
                                 user_row = {
@@ -245,7 +300,7 @@ class DatabaseManager:
                                     "createdAt": msg.additional_kwargs.get("created_at"),
                                 }
 
-                        if msg.type == 'ai' and self.filter_by_tags(EXCLUDED_TAGS_DEFAULT, tags, msg.type):
+                        if msg.type == 'ai' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
                             # Always concatenate MCP responses to agent message
                             if mcp_str == "":
                                 mcp_str = mcp_resp_str
@@ -268,6 +323,9 @@ class DatabaseManager:
                     rows.append(user_row)
                 if agent_row:
                     rows.append(agent_row)
+
+                if limit and len(rows) >= limit:
+                    return rows[:limit]
 
         return rows
 
