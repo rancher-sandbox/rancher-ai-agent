@@ -4,7 +4,7 @@ import logging
 import json
 
 from ..dependencies import get_llm
-from ..services.agent.agent import create_agent
+from ..services.agent.factory import create_agent
 from dataclasses import dataclass
 from fastapi import APIRouter
 from fastapi import  WebSocket, WebSocketDisconnect, Depends
@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 from langgraph.graph.state import CompiledStateGraph
 from langfuse.langchain import CallbackHandler
 from langchain_core.language_models.llms import BaseLanguageModel
+from langgraph.types import  Command
 
 router = APIRouter()
 
@@ -32,60 +33,47 @@ async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depe
     """
     await websocket.accept()
     logging.debug("ws connection opened")
-    agent, session, client_ctx = await create_agent(llm=llm, websocket=websocket)
-    thread_id = str(uuid.uuid4())
-            
-    config = {
-        "thread_id": thread_id,
-    }
-    if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
-        langfuse_handler = CallbackHandler()
-        config["callbacks"] = [langfuse_handler]
-
-    while True:
-        try:
-            request = await websocket.receive_text()
-            
-            ws_request = _parse_websocket_request(request)
-            if ws_request.context:
-                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
-                for key, value in ws_request.context.items():
-                    context_prompt += f"{key}:{value};"
-                ws_request.prompt += context_prompt
-            if ws_request.agent:
-                config["agent"] = ws_request.agent
-            else:
-                config["agent"] = ""
-
-            await stream_agent_response(
-                agent=agent,
-                input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
-                config=config,
-                websocket=websocket)
-        except WebSocketDisconnect:
-            logging.info(f"Client {websocket.client.host} disconnected.")
-            break
-        except Exception as e:
-            logging.error(f"An error occurred: {e}", exc_info=True)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
-            else:
-                break
-        finally:
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text("</message>")
     
-    # Clean up MCP session and client. Each user requires their own session for token-based authentication.
-    # TODO: Remove per-user sessions once OAuth 2.0 is implemented.
-    try:
-        await session.__aexit__(None, None, None)
-        await client_ctx.__aexit__(None, None, None)
-    except Exception as e:
-        logging.error(f"Error during mcp session and client cleanup: {e}", exc_info=True)
+    async with create_agent(llm=llm, websocket=websocket) as agent:
+        thread_id = str(uuid.uuid4())
+                
+        config = {
+            "thread_id": thread_id,
+        }
+        if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
+            langfuse_handler = CallbackHandler()
+            config["callbacks"] = [langfuse_handler]
 
-async def stream_agent_response(
+        while True:
+            try:
+                request = await websocket.receive_text()
+                ws_request = _parse_websocket_request(request)
+                prompt = _build_prompt_with_context(ws_request)
+                config["agent"] = ws_request.agent or ""
+                input_data = _build_input_data(agent, thread_id, prompt)
+                
+                await _call_agent(
+                    agent=agent,
+                    input_data=input_data,
+                    config=config,
+                    websocket=websocket)
+                
+            except WebSocketDisconnect:
+                logging.info(f"Client {websocket.client.host} disconnected.")
+                break
+            except Exception as e:
+                logging.error(f"An error occurred: {e}", exc_info=True)
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+                else:
+                    break
+            finally:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text("</message>")
+
+async def _call_agent(
     agent: CompiledStateGraph,
-    input_data: dict[str, list[dict[str, str]]],
+    input_data: any, 
     config: dict,
     websocket: WebSocket,
 ) -> None:
@@ -107,23 +95,74 @@ async def stream_agent_response(
         stream_mode=["updates", "messages", "custom", "events"],
     ):
         if stream["event"] == "on_chat_model_stream":
-            if stream["data"]["chunk"].content and (stream["metadata"]["langgraph_node"] == "agent" or stream["metadata"]["langgraph_node"] == "model"):
-                await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
+            if text := _extract_streaming_text(stream):
+                await websocket.send_text(text)
         
         if stream["event"] == "on_custom_event":
             await websocket.send_text(stream["data"])
     
         if stream["event"] == "on_chain_stream":
-            data = stream.get("data")
-            if isinstance(data, dict):
-                chunk = data.get("chunk")
-                if chunk and isinstance(chunk, (list, tuple)) and len(chunk) > 0 and chunk[0] == "updates":
-                    if len(chunk) > 1 and isinstance(chunk[1], dict):
-                        interrupts = chunk[1].get("__interrupt__", [])
-                        if interrupts and len(interrupts) > 0:
-                            interrupt_value = interrupts[0].value
-                            if interrupt_value:
-                                await websocket.send_text(interrupt_value)
+            if interrupt_value := _extract_interrupt_value(stream):
+                await websocket.send_text(interrupt_value)
+
+def _extract_streaming_text(stream: dict) -> str | None:
+    """
+    Extracts text content from a chat model stream event.
+    
+    Only extracts text from 'agent' or 'model' nodes to avoid streaming
+    intermediate processing steps.
+    
+    Args:
+        stream: The stream event dictionary from astream_events.
+        
+    Returns:
+        The extracted text content, or None if not applicable.
+    """
+    STREAMABLE_NODES = ("agent", "model")
+    
+    node = stream.get("metadata", {}).get("langgraph_node")
+    if node not in STREAMABLE_NODES:
+        return None
+    
+    chunk = stream.get("data", {}).get("chunk")
+    if not chunk or not chunk.content:
+        return None
+    
+    return _extract_text_from_chunk_content(chunk.content)
+
+def _extract_interrupt_value(stream: dict) -> str | None:
+    """
+    Extracts the interrupt value from a chain stream event.
+    
+    LangGraph sends interrupt signals through on_chain_stream events with a specific
+    structure: data.chunk is a tuple like ("updates", {"__interrupt__": [Interrupt(...)]})
+    
+    Args:
+        stream: The stream event dictionary from astream_events.
+        
+    Returns:
+        The interrupt value string if present, None otherwise.
+    """
+    data = stream.get("data")
+    if not isinstance(data, dict):
+        return None
+    
+    chunk = data.get("chunk")
+    if not isinstance(chunk, (list, tuple)) or len(chunk) < 2:
+        return None
+    
+    if chunk[0] != "updates":
+        return None
+    
+    updates = chunk[1]
+    if not isinstance(updates, dict):
+        return None
+    
+    interrupts = updates.get("__interrupt__", [])
+    if not interrupts:
+        return None
+    
+    return interrupts[0].value or None
     
 def _extract_text_from_chunk_content(chunk_content: any) -> str:
     """
@@ -170,3 +209,50 @@ def _parse_websocket_request(request: str) -> WebSocketRequest:
         )
     except json.JSONDecodeError:
         return WebSocketRequest(prompt=request, context={}, agent="")
+
+def _build_prompt_with_context(ws_request: WebSocketRequest) -> str:
+    """
+    Builds the final prompt by appending context parameters if present.
+    
+    Context parameters are appended as key:value pairs to guide the LLM
+    in populating tool calls with relevant values.
+    
+    Args:
+        ws_request: The parsed WebSocket request.
+        
+    Returns:
+        The prompt string, potentially enriched with context parameters.
+    """
+    if not ws_request.context:
+        return ws_request.prompt
+    
+    context_parts = [f"{key}:{value}" for key, value in ws_request.context.items()]
+    context_suffix = (
+        ". Use the following parameters to populate tool calls when appropriate. \n"
+        "Only include parameters relevant to the user's request "
+        "(e.g., omit namespace for cluster-wide operations). \n"
+        f"Parameters (separated by ;): \n {';'.join(context_parts)};"
+    )
+    return ws_request.prompt + context_suffix
+
+def _build_input_data(agent: CompiledStateGraph, thread_id: str, prompt: str) -> dict | Command:
+    """
+    Builds the input data for the agent, handling interrupt resumption.
+    
+    If the agent is waiting on an interrupt, resumes with the user's response.
+    Otherwise, creates a new user message.
+    
+    Args:
+        agent: The compiled LangGraph agent.
+        thread_id: The conversation thread ID.
+        prompt: The user's prompt.
+        
+    Returns:
+        Either a Command to resume an interrupt, or a messages dict for a new turn.
+    """
+    state = agent.get_state(config={"configurable": {"thread_id": thread_id}})
+    
+    if state.interrupts:
+        return Command(resume=prompt)
+    
+    return {"messages": [{"role": "user", "content": prompt}]}

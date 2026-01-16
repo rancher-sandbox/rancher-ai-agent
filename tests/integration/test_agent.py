@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 from app.main import app
-from app.services.agent.agent import RANCHER_AGENT_PROMPT
+from app.services.agent.factory import RANCHER_AGENT_PROMPT
 from app.services.llm import LLMManager
 from langchain_core.language_models import FakeMessagesListChatModel
 from mcp.server.fastmcp import FastMCP
@@ -132,72 +132,18 @@ def setup_mock_mcp_server(module_monkeypatch):
 
     process.terminate()
 
-@pytest.mark.parametrize(
-        ("prompts", "fake_llm_responses", "expected_messages_send_to_llm", "expected_messages_send_to_websocket"),
-        [
-            (
-                ["fake prompt"],
-                [
-                    AIMessage(
-                        content="fake llm response",
-                    ),
-                ], 
-                [
-                    SystemMessage(content=RANCHER_AGENT_PROMPT),
-                    HumanMessage(content="fake prompt"), 
-                ],
-                ["<message>fake llm response</message>"]
-            ),
-             (
-                ["fake prompt 1",
-                 "fake prompt 2"],
-                [
-                    AIMessage(
-                        content="fake llm response 1",
-                    ),
-                     AIMessage(
-                        content="fake llm response 2",
-                    ),
-                ], 
-                [
-                    SystemMessage(content=RANCHER_AGENT_PROMPT), 
-                    HumanMessage(content="fake prompt 1"), 
-                    AIMessage(
-                        content="fake llm response 1",
-                    ),
-                    HumanMessage(content="fake prompt 2"), 
-                ],
-                ["<message>fake llm response 1</message>",
-                 "<message>fake llm response 2</message>"]
-            ),
-             (
-                ["sum 4 + 5"],
-                [
-                    AIMessage(
-                        content="", # The content is empty when a tool is called
-                        tool_calls=[{
-                            "id": "call_1",
-                            "name": "add",
-                            "args": {"a": 4, "b": 5}
-                        }]
-                    ),
-                    AIMessage(
-                        content="fake llm response",
-                    ),
-                ], 
-                [
-                    SystemMessage(content=RANCHER_AGENT_PROMPT), 
-                    HumanMessage(content="sum 4 + 5"), 
-                    AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
-                    ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
-                ],
-                ["<message>fake llm response</message>"]
-             )
-        ]
-)
-@pytest.mark.skip(reason="Fails in GH Actions with cancel scope error")
-def test_websocket_connection_and_agent_interaction(prompts: list[str], fake_llm_responses: list[BaseMessage], expected_messages_send_to_llm: list[BaseMessage | str], expected_messages_send_to_websocket: list[str]):
-    """Tests the full agent interaction flow through a WebSocket connection."""
+def test_websocket_simple_prompt():
+    """Tests a simple prompt-response interaction."""
+    prompts = ["fake prompt"]
+    fake_llm_responses = [
+        AIMessage(content="fake llm response"),
+    ]
+    expected_messages_send_to_llm = [
+        SystemMessage(content=RANCHER_AGENT_PROMPT),
+        HumanMessage(content="fake prompt"),
+    ]
+    expected_messages_send_to_websocket = ["<message>fake llm response</message>"]
+    
     fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
     LLMManager._instance = fake_llm
     
@@ -209,11 +155,85 @@ def test_websocket_connection_and_agent_interaction(prompts: list[str], fake_llm
                 msg = ""
                 while not msg.endswith("</message>"):
                     msg += websocket.receive_text()
-
                 messages.append(msg)
             
         assert messages == expected_messages_send_to_websocket
         assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
     finally:
-        # Reset the LLM manager instance after each test
+        LLMManager._instance = None
+
+def test_websocket_multiple_prompts():
+    """Tests multiple prompt-response interactions in sequence."""
+    prompts = ["fake prompt 1", "fake prompt 2"]
+    fake_llm_responses = [
+        AIMessage(content="fake llm response 1"),
+        AIMessage(content="fake llm response 2"),
+    ]
+    expected_messages_send_to_llm = [
+        SystemMessage(content=RANCHER_AGENT_PROMPT),
+        HumanMessage(content="fake prompt 1"),
+        AIMessage(content="fake llm response 1"),
+        HumanMessage(content="fake prompt 2"),
+    ]
+    expected_messages_send_to_websocket = [
+        "<message>fake llm response 1</message>",
+        "<message>fake llm response 2</message>"
+    ]
+    
+    fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
+    LLMManager._instance = fake_llm
+    
+    try:
+        messages = []
+        with client.websocket_connect("/agent/ws") as websocket:
+            for prompt in prompts:
+                websocket.send_text(prompt)
+                msg = ""
+                while not msg.endswith("</message>"):
+                    msg += websocket.receive_text()
+                messages.append(msg)
+            
+        assert messages == expected_messages_send_to_websocket
+        assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
+    finally:
+        LLMManager._instance = None
+
+def test_websocket_tool_call():
+    """Tests agent interaction with tool calling."""
+    prompts = ["sum 4 + 5"]
+    fake_llm_responses = [
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "id": "call_1",
+                "name": "add",
+                "args": {"a": 4, "b": 5}
+            }]
+        ),
+        AIMessage(content="fake llm response"),
+    ]
+    expected_messages_send_to_llm = [
+        SystemMessage(content=RANCHER_AGENT_PROMPT),
+        HumanMessage(content="sum 4 + 5"),
+        AIMessage(content="", tool_calls=[{"id": "call_1", "name": "add", "args": {"a": 4, "b": 5}}]),
+        ToolMessage(content="sum is 9", name="add", tool_call_id="call_1")
+    ]
+    expected_messages_send_to_websocket = ["<message>fake llm response</message>"]
+    
+    fake_llm = FakeMessagesListChatModelWithTools(responses=fake_llm_responses)
+    LLMManager._instance = fake_llm
+    
+    try:
+        messages = []
+        with client.websocket_connect("/agent/ws") as websocket:
+            for prompt in prompts:
+                websocket.send_text(prompt)
+                msg = ""
+                while not msg.endswith("</message>"):
+                    msg += websocket.receive_text()
+                messages.append(msg)
+            
+        assert messages == expected_messages_send_to_websocket
+        assert expected_messages_send_to_llm == fake_llm.messages_send_to_llm
+    finally:
         LLMManager._instance = None
