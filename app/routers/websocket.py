@@ -105,7 +105,6 @@ async def _call_agent(
             if interrupt_value := _extract_interrupt_value(stream):
                 await websocket.send_text(interrupt_value)
 
-
 def _extract_streaming_text(stream: dict) -> str | None:
     """
     Extracts text content from a chat model stream event.
@@ -130,7 +129,6 @@ def _extract_streaming_text(stream: dict) -> str | None:
         return None
     
     return _extract_text_from_chunk_content(chunk.content)
-
 
 def _extract_interrupt_value(stream: dict) -> str | None:
     """
@@ -165,7 +163,6 @@ def _extract_interrupt_value(stream: dict) -> str | None:
         return None
     
     return interrupts[0].value or None
-
     
 def _extract_text_from_chunk_content(chunk_content: any) -> str:
     """
@@ -213,7 +210,6 @@ def _parse_websocket_request(request: str) -> WebSocketRequest:
     except json.JSONDecodeError:
         return WebSocketRequest(prompt=request, context={}, agent="")
 
-
 def _build_prompt_with_context(ws_request: WebSocketRequest) -> str:
     """
     Builds the final prompt by appending context parameters if present.
@@ -238,7 +234,6 @@ def _build_prompt_with_context(ws_request: WebSocketRequest) -> str:
         f"Parameters (separated by ;): \n {';'.join(context_parts)};"
     )
     return ws_request.prompt + context_suffix
-
 
 def _build_input_data(agent: CompiledStateGraph, thread_id: str, prompt: str) -> dict | Command:
     """

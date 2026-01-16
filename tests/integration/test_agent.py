@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 from app.main import app
-from app.services.agent.agent import RANCHER_AGENT_PROMPT
+from app.services.agent.factory import RANCHER_AGENT_PROMPT
 from app.services.llm import LLMManager
 from langchain_core.language_models import FakeMessagesListChatModel
 from mcp.server.fastmcp import FastMCP
