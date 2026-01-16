@@ -130,7 +130,7 @@ class BaseAgentBuilder:
             A dictionary containing a list of ToolMessage objects with the tool results,
             or an error message if a tool fails or is cancelled."""
         outputs = []
-        for tool_call in state["messages"][-1].tool_calls:
+        for tool_call in getattr(state["messages"][-1], "tool_calls", []):
             if not handle_interrupt(tool_call):
                 return {"messages": ToolMessage(
                         content=INTERRUPT_CANCEL_MESSAGE,
@@ -173,7 +173,7 @@ class BaseAgentBuilder:
             "summarize_conversation", or "end"."""
         messages = state["messages"]
         last_message = messages[-1]
-        if not last_message.tool_calls:
+        if not getattr(last_message, "tool_calls", []):
             if len(messages) > 7:
                 return "summarize_conversation"
             return "end"
@@ -183,7 +183,7 @@ class BaseAgentBuilder:
     def should_continue(self, state: AgentState):
         """Check if agent should continue based on tool calls."""
         last_message = state['messages'][-1]
-        if not last_message.tool_calls:
+        if not getattr(last_message, "tool_calls", []):
             return "end"
         return "continue"
         
