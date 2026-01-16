@@ -1,11 +1,3 @@
-"""
-Minimal agent for reading chat state from checkpointer.
-
-This module provides a simplified agent that can only read agent state
-from the database. It doesn't execute any LLM or tools, just connects
-to the checkpoint store.
-"""
-
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 
@@ -42,7 +34,6 @@ class ChatAgentBuilder:
         workflow.add_edge("reader", "__end__")
         
         return workflow.compile(checkpointer=self.checkpointer)
-
 
 def create_chat_agent(checkpointer: Checkpointer) -> CompiledStateGraph:
     """

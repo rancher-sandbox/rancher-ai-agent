@@ -9,23 +9,6 @@ mcp:
     tag: v0.1.1
     pullPolicy: IfNotPresent
 
-db:
-  replicaCount: 1
-  service:
-    type: ClusterIP
-    port: 5432
-  postgres:
-    image:
-      repository: postgres
-      tag: "18"
-      pullPolicy: IfNotPresent
-    password: "password"
-    user: "postgres"
-    name: "postgres"
-    persistence:
-      size: 1Gi
-      storageClass: manual
-
 llmModel: ""
 ollamaLlmModel: ""
 geminiLlmModel: ""
@@ -49,8 +32,9 @@ rag:
 langfuseSecretKey:
 langfusePublicKey:
 langfuseHost:
-dbManager:
-  enabled: true
+persistence:
+  enabled: false
+  dbConnectionString: ""
 insecureSkipTls: false
 llmMock:
   enabled: false

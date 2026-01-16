@@ -3,14 +3,12 @@ import logging
 
 from contextlib import asynccontextmanager, AsyncExitStack
 from dataclasses import dataclass
-from fastapi import  WebSocket
+from fastapi import  WebSocket, Request
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.graph.state import CompiledStateGraph
 from langchain_core.language_models.llms import BaseLanguageModel
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from .child import create_child_agent
 from .chat import create_chat_agent
@@ -104,17 +102,17 @@ class AgentContext:
     client_ctx: any
 
 @asynccontextmanager
-async def create_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType, checkpointer = None):
+async def create_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType):
     """
     TODO multiagent support
 
     Context manager that creates and manages agent lifecycle.
     """
-    async with _create_rancher_core_agent(llm=llm, websocket=websocket, request_type=request_type, checkpointer=checkpointer) as agent_ctx:
+    async with _create_rancher_core_agent(llm=llm, websocket=websocket, request_type=request_type) as agent_ctx:
         yield agent_ctx
 
 @asynccontextmanager
-async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType, checkpointer = None):
+async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType):
     """
     Creates a Rancher core agent with MCP client connection.
     
@@ -162,21 +160,8 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
         # if ENABLE_RAG is true, add the retriever tools to the tools list
         if os.environ.get("ENABLE_RAG", "false").lower() == "true":
             tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
-        
-        # Initialize checkpointer for persisting agent state in Postgres DB if enabled
-        if not checkpointer and websocket.app.db_manager:
-            try:
-                checkpointer = await stack.enter_async_context(
-                    AsyncPostgresSaver.from_conn_string(websocket.app.db_manager.db_url)
-                )
-                logging.debug("Using PostgreSQL checkpointer for agent state.")
-            except Exception as e:
-                logging.warning(f"Using in-memory-saver checkpointer due to error initializing PostgreSQL saver: {e}")
-
-        if not checkpointer:
-            checkpointer = InMemorySaver()
-            logging.debug("Using in-memory checkpointer for agent state.")
-
+            
+        checkpointer = websocket.app.memory_manager.get_checkpointer()
         agent = create_child_agent(llm, tools, _get_system_prompt(request_type), checkpointer)
         
         yield AgentContext(
@@ -187,7 +172,7 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
 
     # All contexts automatically cleaned up here in reverse order since we used AsyncExitStack
 
-def create_rest_api_agent(checkpointer):
+def create_rest_api_agent(request: Request):
     """
     Creates a chat agent for REST API endpoints.
     
@@ -200,7 +185,7 @@ def create_rest_api_agent(checkpointer):
     Returns:
         CompiledStateGraph: The compiled agent ready to read state.
     """
-    return create_chat_agent(checkpointer)
+    return create_chat_agent(request.app.memory_manager.get_checkpointer())
 
 def _get_system_prompt(type: RequestType) -> str:
     """

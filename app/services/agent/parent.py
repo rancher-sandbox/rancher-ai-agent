@@ -17,7 +17,6 @@ from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
 from langgraph.types import Command
-from langgraph.checkpoint.memory import InMemorySaver
 from typing_extensions import TypedDict, Literal
 from langchain_core.callbacks.manager import dispatch_custom_event
 from dataclasses import dataclass

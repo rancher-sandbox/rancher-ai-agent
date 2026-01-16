@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response, JSONResponse
 
 from ..services.auth import get_user_id
+from ..services.agent.agent import create_rest_api_agent
 
 async def get_user_id_from_request(request: Request) -> str:
     """
@@ -43,7 +44,7 @@ async def get_chats(request: Request):
     user_id = await get_user_id_from_request(request)
 
     try:
-        chats = await request.app.db_manager.fetch_chats(
+        chats = await request.app.memory_manager.fetch_chats(
             user_id=user_id
         )
         return JSONResponse(
@@ -70,7 +71,7 @@ async def delete_chats(request: Request) -> JSONResponse:
     user_id = await get_user_id_from_request(request)
 
     try:
-        await request.app.db_manager.delete_chats(
+        await request.app.memory_manager.delete_chats(
             user_id=user_id
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -100,7 +101,7 @@ async def get_chat(request: Request, chat_id: str) -> JSONResponse:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
     
     try:
-        chat = await request.app.db_manager.fetch_chat(
+        chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id
         )
@@ -141,14 +142,14 @@ async def update_chat(request: Request, chat_id: str, chat_data: dict) -> JSONRe
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_data is required")
 
     try:
-        chat = await request.app.db_manager.fetch_chat(
+        chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id
         )
         if not chat:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
-        updated_chat = await request.app.db_manager.update_chat(
+        updated_chat = await request.app.memory_manager.update_chat(
             chat_id=chat_id,
             user_id=user_id,
             chat_data=chat_data
@@ -185,7 +186,7 @@ async def delete_chat(request: Request, chat_id: str) -> JSONResponse:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
     
     try:
-        await request.app.db_manager.delete_chat(
+        await request.app.memory_manager.delete_chat(
             chat_id=chat_id,
             user_id=user_id
         )
@@ -218,14 +219,17 @@ async def get_chat_messages(request: Request, chat_id: str) -> JSONResponse:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
     
     try:
-        chat = await request.app.db_manager.fetch_chat(
+        chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id
         )
         if not chat:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+        
+        stateGraph = create_rest_api_agent(request)
 
-        messages = await request.app.db_manager.fetch_messages(
+        messages = await request.app.memory_manager.fetch_messages(
+            stateGraph=stateGraph,
             chat_id=chat_id,
             user_id=user_id
         )
