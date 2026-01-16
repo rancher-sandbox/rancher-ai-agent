@@ -46,7 +46,7 @@ class ParentAgentBuilder(BaseAgentBuilder):
             child_agents: List of available specialized child agents
             checkpointer: Checkpointer for persisting agent state
         """
-        super().__init__(llm=llm, tools=[], system_prompt="", checkpointer=checkpointer)
+        super().__init__(llm=llm, tools=[], system_prompt="", checkpointer=checkpointer, agent_config=None)
         self.child_agents = child_agents
     
     def choose_child_agent(self, state: AgentState, config: RunnableConfig):

@@ -68,7 +68,7 @@ async def create_agent(llm: BaseLanguageModel, websocket: WebSocket):
                 child_agents.append(ChildAgent(
                     name=agent_cfg.name,
                     description=agent_cfg.description,
-                    agent=create_child_agent(llm, tools, agent_cfg.system_prompt, InMemorySaver())
+                    agent=create_child_agent(llm, tools, agent_cfg.system_prompt, InMemorySaver(), agent_cfg)
                 ))
             parent_agent = create_parent_agent(llm, child_agents, InMemorySaver())
 
@@ -78,7 +78,7 @@ async def create_agent(llm: BaseLanguageModel, websocket: WebSocket):
         
         async with AsyncExitStack() as stack:
             tools = await _create_mcp_tools(stack, websocket, RANCHER_AGENT)
-            agent = create_child_agent(llm, tools, RANCHER_AGENT.system_prompt, InMemorySaver())
+            agent = create_child_agent(llm, tools, RANCHER_AGENT.system_prompt, InMemorySaver(), RANCHER_AGENT)
             
             yield agent
 

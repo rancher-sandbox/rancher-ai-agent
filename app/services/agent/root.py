@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
-
+from .builtin_agents import AgentConfig
 from .base import BaseAgentBuilder, AgentState
 
 
@@ -49,7 +49,7 @@ class RootAgentBuilder(BaseAgentBuilder):
         return workflow.compile(checkpointer=self.checkpointer)
 
 
-def create_root_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
+def create_root_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer, agent_config: AgentConfig) -> CompiledStateGraph:
     """
     Creates a LangGraph root agent capable of interacting with Rancher and Kubernetes resources.
     
@@ -65,6 +65,6 @@ def create_root_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: 
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-    builder = RootAgentBuilder(llm, tools, system_prompt, checkpointer)
+    builder = RootAgentBuilder(llm, tools, system_prompt, checkpointer, agent_config)
 
     return builder.build()

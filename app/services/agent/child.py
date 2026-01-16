@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from .builtin_agents import AgentConfig
 
 from .base import BaseAgentBuilder, AgentState
 
@@ -49,7 +50,7 @@ class ChildAgentBuilder(BaseAgentBuilder):
         return workflow.compile(checkpointer=self.checkpointer)
 
 
-def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer) -> CompiledStateGraph:
+def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer, agent_config: AgentConfig) -> CompiledStateGraph:
     """
     Creates a LangGraph child agent capable of interacting with Rancher and Kubernetes resources.
     
@@ -61,10 +62,9 @@ def create_child_agent(llm: BaseChatModel, tools: list[BaseTool], system_prompt:
         tools: A list of tools the agent can use (e.g., to interact with K8s).
         system_prompt: The initial system-level instructions for the agent.
         checkpointer: The checkpointer for persisting agent state.
-    
+        agent_config: Configuration for the agent's behavior and settings.
     Returns:
         A compiled LangGraph StateGraph ready to be invoked.
     """
-    builder = ChildAgentBuilder(llm, tools, system_prompt, checkpointer)
-
+    builder = ChildAgentBuilder(llm, tools, system_prompt, checkpointer, agent_config)
     return builder.build()

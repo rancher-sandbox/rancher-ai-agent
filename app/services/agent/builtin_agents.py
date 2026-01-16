@@ -111,8 +111,8 @@ RANCHER_AGENT = AgentConfig(
     mcp_url="rancher-mcp-server.cattle-ai-agent-system.svc",
     authentication=AuthenticationType.RANCHER,
     human_validation_tools=[
-        HumanValidationTool(name="CREATE", type=ToolActionType.CREATE),
-        HumanValidationTool(name="UPDATE", type=ToolActionType.UPDATE),
+        HumanValidationTool(name="createKubernetesResource", type=ToolActionType.CREATE),
+        HumanValidationTool(name="patchKubernetesResource", type=ToolActionType.UPDATE),
     ]
 )
 

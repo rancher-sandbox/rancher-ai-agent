@@ -4,6 +4,7 @@ Base agent builder with shared logic for all agent types.
 
 import json
 import logging
+import langgraph.types
 
 from typing import Annotated, Sequence, TypedDict
 from langchain_core.messages import BaseMessage
@@ -15,7 +16,7 @@ from langgraph.graph.state import Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
 from langchain_core.callbacks.manager import dispatch_custom_event
-import langgraph.types
+from .builtin_agents import AgentConfig, HumanValidationTool
 
 INTERRUPT_CANCEL_MESSAGE = "tool execution cancelled by the user"
 
@@ -28,7 +29,7 @@ class AgentState(TypedDict):
 class BaseAgentBuilder:
     """Base class for agent builders with shared logic."""
     
-    def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer):
+    def __init__(self, llm: BaseChatModel, tools: list[BaseTool], system_prompt: str, checkpointer: Checkpointer, agent_config: AgentConfig):
         """
         Initializes the BaseAgentBuilder.
 
@@ -44,6 +45,7 @@ class BaseAgentBuilder:
         self.checkpointer = checkpointer
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.tools_by_name = {tool.name: tool for tool in self.tools}
+        self.agent_config = agent_config
     
     def summarize_conversation_node(self, state: AgentState):
         """
@@ -131,7 +133,7 @@ class BaseAgentBuilder:
             or an error message if a tool fails or is cancelled."""
         outputs = []
         for tool_call in getattr(state["messages"][-1], "tool_calls", []):
-            if not handle_interrupt(tool_call):
+            if not handle_interrupt(getattr(self.agent_config, "human_validation_tools", []), tool_call):
                 return {"messages": ToolMessage(
                         content=INTERRUPT_CANCEL_MESSAGE,
                         name=tool_call["name"],
@@ -240,7 +242,7 @@ def create_confirmation_response(payload: str, type: str, name: str, kind: str, 
     return f'<confirmation-response>{json_payload}</confirmation-response>'
 
 
-def should_interrupt(tool_call: any) -> str:
+def should_interrupt(human_validation_tools: list[HumanValidationTool], tool_call: any) -> str:
     """
     Checks if a tool call requires user confirmation and generates an interrupt message.
 
@@ -251,16 +253,23 @@ def should_interrupt(tool_call: any) -> str:
         A formatted string to trigger a langgraph.types.interrupt, or an empty string
         if no interruption is needed.
     """
-    if tool_call["name"] == "patchKubernetesResource":
-        return create_confirmation_response(tool_call['args']['patch'], "patch", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
-    if tool_call["name"] == "createKubernetesResource":
-        return create_confirmation_response(tool_call['args']['resource'], "create", tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
+    for tools in human_validation_tools:
+        if tools.name == tool_call["name"]:
+            if tools.type == "CREATE":
+                payload = tool_call['args']['resource']
+            elif tools.type == "UPDATE":
+                payload = tool_call['args']['patch']
+            else:
+                logging.error(f"unknown human validation tool type: {tools.type}")
+                return ""
+            return create_confirmation_response(payload, tools.type.lower(), tool_call['args']['name'], tool_call['args']['kind'], tool_call['args']['cluster'], tool_call['args']['namespace'])
+
     return ""
 
     
-def handle_interrupt(tool_call: dict) -> bool:
+def handle_interrupt(human_validation_tools: list[HumanValidationTool], tool_call: dict) -> bool:
     """Handles the user confirmation interrupt for a tool call."""
-    if interrupt_message := should_interrupt(tool_call):
+    if interrupt_message := should_interrupt(human_validation_tools, tool_call):
         response = langgraph.types.interrupt(interrupt_message)
         if response != "yes":
             return False
