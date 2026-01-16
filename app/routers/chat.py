@@ -33,7 +33,7 @@ async def get_user_id_from_request(request: Request) -> str:
 router = APIRouter(prefix="/agent/api", tags=["chats"])
 
 @router.get("/chats")
-async def get_chats(request: Request):
+async def get_chats(request: Request, sort: str = "createdAt:desc"):
     """
     TODO: add filtering by tags from query parameters.
     Get all threads that have at least one user message and return them as chats list.
@@ -47,6 +47,9 @@ async def get_chats(request: Request):
         chats = await request.app.memory_manager.fetch_chats(
             user_id=user_id
         )
+
+        chats = sorted(chats, key=lambda c: c.get("createdAt", 0), reverse=(sort != "createdAt:asc"))
+
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=chats

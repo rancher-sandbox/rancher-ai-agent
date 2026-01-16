@@ -116,6 +116,7 @@ class MemoryManager:
 
     async def fetch_chats(self, user_id: str, filters: dict = {}) -> list:
         """
+        TODO: implement filtering logic.
         Fetch chat threads from the database for a specific user.
 
         Args:
