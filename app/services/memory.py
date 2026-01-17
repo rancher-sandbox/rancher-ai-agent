@@ -280,16 +280,34 @@ class MemoryManager:
             user_row = None
             agent_row = None
             
-            mcp_str = ""
-            llm_str = ""
+            # Accumulators for the current request_id
+            all_mcp_responses = []
+            last_interrupt_val = ""
+            
+            # First pass to collect all MCP responses and last_interrupt across all checkpoints of this request_id
+            for state in states:
+                metadata = state.values.get("agent_metadata", {})
+                
+                # Collect MCP responses
+                mcp_in_state = metadata.get("mcp_responses", [])
+                if mcp_in_state:
+                    for resp in mcp_in_state:
+                        if resp not in all_mcp_responses:
+                            all_mcp_responses.append(resp)
+                
+                # Collect last_interrupt (take the most recent non-empty one)
+                interrupt_in_state = metadata.get("last_interrupt", "")
+                if interrupt_in_state:
+                    last_interrupt_val = interrupt_in_state
+
+            mcp_str = "".join(all_mcp_responses)
+            interrupt_str = str(last_interrupt_val) if last_interrupt_val else ""
 
             for state in states:
                 agent_metadata = state.values.get("agent_metadata", {})
                 context = agent_metadata.get("context", {})
                 tags = agent_metadata.get("tags", [])
-                mcp_responses = agent_metadata.get("mcp_responses", [])
-                mcp_resp_str = "".join(mcp_responses) if mcp_responses else ""
-
+                
                 # Filter out already processed messages
                 messages = [m for m in state.values.get("messages", []) if hasattr(m, "id") and m.id not in processed_message_ids]
 
@@ -308,14 +326,20 @@ class MemoryManager:
                             }
 
                     if msg.type == 'ai' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
-                        # Always concatenate MCP responses to agent message
-                        if mcp_str == "":
-                            mcp_str = mcp_resp_str
-                        if llm_str == "":
-                            llm_str = msg.content if msg.content else ""
-                            
-                        text = (mcp_str + llm_str) if (mcp_str or llm_str) else agent_row["message"] if agent_row else ""
-                        if text:
+                        llm_str = msg.content if msg.content else ""
+                        
+                        text = llm_str
+                        
+                        if interrupt_str and llm_str:
+                            text = llm_str
+                        elif interrupt_str:
+                            text = interrupt_str
+                        elif mcp_str:
+                            text = mcp_str + llm_str
+
+                        text = text if text else agent_row["message"] if agent_row else ""
+                        
+                        if text:                            
                             agent_row = {
                                 "chatId": chat_id,
                                 "requestId": request_id,
