@@ -15,6 +15,10 @@ async def get_user_id(host: str, token: str) -> str:
             })
             payload = resp.json()
             
+            if (payload.get("type") == "error") or (resp.status_code != 200) or ("data" not in payload) or (len(payload["data"]) == 0):
+                logging.error("user API returned error: %s - %s", resp.status_code, payload)
+                raise Exception("Failed to retrieve user ID from Rancher API")
+            
             user_id = payload["data"][0]["id"]
             
             if user_id:

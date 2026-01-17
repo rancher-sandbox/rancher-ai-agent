@@ -41,9 +41,13 @@ async def get_chats(request: Request, sort: str = "createdAt:desc"):
     Returns:
         A list of chat objects.
     """
-    user_id = await get_user_id_from_request(request)
 
     try:
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
         chats = await request.app.memory_manager.fetch_chats(
             user_id=user_id
         )
@@ -55,6 +59,8 @@ async def get_chats(request: Request, sort: str = "createdAt:desc"):
             content=chats
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Error fetching chats for user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -70,15 +76,20 @@ async def delete_chats(request: Request) -> JSONResponse:
     Returns:
         A success message and an HTTP status code.
     """
-    
-    user_id = await get_user_id_from_request(request)
 
     try:
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        
         await request.app.memory_manager.delete_chats(
             user_id=user_id
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Error deleting chats for user_id {user_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -97,13 +108,16 @@ async def get_chat(request: Request, chat_id: str) -> JSONResponse:
     Returns:
         A chat object and an HTTP status code.
     """
-    
-    user_id = await get_user_id_from_request(request)
 
-    if not chat_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
-    
     try:
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+        if not chat_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
+
         chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id
@@ -135,16 +149,19 @@ async def update_chat(request: Request, chat_id: str, chat_data: dict) -> JSONRe
     Returns:
         The updated chat object and an HTTP status code.
     """
-    
-    user_id = await get_user_id_from_request(request)
-
-    if not chat_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
-    
-    if not chat_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_data is required")
 
     try:
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+        if not chat_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
+        
+        if not chat_data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_data is required")
+
         chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id
@@ -182,13 +199,16 @@ async def delete_chat(request: Request, chat_id: str) -> JSONResponse:
     Returns:
         A success message and an HTTP status code.
     """
-    
-    user_id = await get_user_id_from_request(request)
 
-    if not chat_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
-    
     try:
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+        if not chat_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
+
         await request.app.memory_manager.delete_chat(
             chat_id=chat_id,
             user_id=user_id
@@ -215,13 +235,16 @@ async def get_chat_messages(request: Request, chat_id: str) -> JSONResponse:
     Returns:
         A list of message objects and an HTTP status code.
     """
-    
-    user_id = await get_user_id_from_request(request)
 
-    if not chat_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
-    
-    try:
+    try:        
+        user_id = await get_user_id_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+        if not chat_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="chat_id is required")
+
         chat = await request.app.memory_manager.fetch_chat(
             chat_id=chat_id,
             user_id=user_id

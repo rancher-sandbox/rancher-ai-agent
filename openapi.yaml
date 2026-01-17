@@ -16,29 +16,19 @@ paths:
   /chats:
     get:
       summary: List all chats for the current user
-      description: Retrieves all chats belonging to the authenticated user with optional tag filtering
+      description: Retrieves all chats belonging to the authenticated user with optional sorting
       operationId: list_chats
       tags:
         - Chats
       parameters:
-        - name: include-tag
+        - name: sort
           in: query
-          description: Select chats that have at least one message with these tags
+          description: "Sort order for chats. Example: createdAt:asc or createdAt:desc"
           required: false
           schema:
-            type: array
-            items:
-              type: string
-          example: ["urgent", "welcome"]
-        - name: exclude-tag
-          in: query
-          description: Select chats that have at least one message without these tags
-          required: false
-          schema:
-            type: array
-            items:
-              type: string
-          example: ["draft"]
+            type: string
+            enum: [createdAt:asc, createdAt:desc]
+          example: createdAt:desc
       responses:
         '200':
           description: List of chats
@@ -48,8 +38,14 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Chat'
-        '400':
-          description: User not found or authentication failed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
           content:
             application/json:
               schema:
@@ -77,7 +73,106 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /chats/{id}:
+  /chats/{chat_id}:
+    get:
+      summary: Get a chat by ID
+      description: Retrieves a chat by its unique identifier.
+      operationId: get_chat
+      tags:
+        - Chats
+      parameters:
+        - name: chat_id
+          in: path
+          description: The unique identifier of the chat
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: ad924baf-24d7-49a5-84ae-bba3a58218a6
+      responses:
+        '200':
+          description: Chat object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: chat_id is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update a chat by ID
+      description: Updates a chat's metadata by its unique identifier.
+      operationId: update_chat
+      tags:
+        - Chats
+      parameters:
+        - name: chat_id
+          in: path
+          description: The unique identifier of the chat
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: ad924baf-24d7-49a5-84ae-bba3a58218a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Chat data to update
+      responses:
+        '200':
+          description: Updated chat object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: chat_id or chat_data is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     delete:
       summary: Delete a specific chat
       description: Deletes a specific chat and all associated messages. Only the chat owner can delete it.
@@ -85,7 +180,7 @@ paths:
       tags:
         - Chats
       parameters:
-        - name: id
+        - name: chat_id
           in: path
           description: The unique identifier of the chat to delete
           required: true
@@ -96,20 +191,32 @@ paths:
       responses:
         '204':
           description: Chat deleted successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
-          description: User not found or chat id missing
+          description: chat_id is required
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Chat not found or user is not the owner
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /chats/{id}/messages:
+  /chats/{chat_id}/messages:
     get:
       summary: List messages in a chat
       description: Retrieves all messages for a specific chat, grouped by request ID and sorted chronologically with optional tag filtering
@@ -117,7 +224,7 @@ paths:
       tags:
         - Messages
       parameters:
-        - name: id
+        - name: chat_id
           in: path
           description: The unique identifier of the chat
           required: true
@@ -153,7 +260,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Message'
         '400':
-          description: User not found or id missing
+          description: User not found or chat_id missing
           content:
             application/json:
               schema:
@@ -169,6 +276,9 @@ components:
           type: string
           format: uuid
           description: Unique identifier for the chat
+        userId:
+          type: string
+          description: ID of the user who owns the chat
         name:
           type: string
           description: Display name of the chat
@@ -177,6 +287,8 @@ components:
           description: Unix timestamp of when the chat was created
       required:
         - id
+        - userId
+        - name
         - createdAt
       example:
         id: ad924baf-24d7-49a5-84ae-bba3a58218a6

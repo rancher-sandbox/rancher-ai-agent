@@ -21,16 +21,16 @@ class MemoryManager:
         if os.environ.get("DB_ENABLED", "false").lower() == "true":
             logging.info("Initializing PostgreSQL Checkpointer...")
 
-            self.pool = AsyncConnectionPool(
+            self.db_pool = AsyncConnectionPool(
                 conninfo=self.db_url, 
                 max_size=20,
                 kwargs={"autocommit": True},
                 open=False
             )
             
-            await self.pool.open()
+            await self.db_pool.open()
 
-            self.checkpointer = AsyncPostgresSaver(self.pool)
+            self.checkpointer = AsyncPostgresSaver(self.db_pool)
 
             await self.checkpointer.setup()
             logging.info("PostgreSQL Checkpointer ready.")
@@ -39,8 +39,8 @@ class MemoryManager:
             self.checkpointer = InMemorySaver()
 
     async def destroy(self):
-        if self.pool:
-            await self.pool.close()
+        if self.db_pool:
+            await self.db_pool.close()
             logging.info("PostgreSQL pool closed.")
 
     def get_checkpointer(self):
