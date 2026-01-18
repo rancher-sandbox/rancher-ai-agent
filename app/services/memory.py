@@ -67,16 +67,17 @@ class MemoryManager:
                         return False
         return True
     
-    def _is_empty_chat(self, checkpoint_tuple: CheckpointTuple) -> bool:
+    def _is_empty_chat(self, checkpoint_tuple: CheckpointTuple, tag_filters: list[dict] = []) -> bool:
         """
         Check if a chat is empty from the checkpoint tuple.
-        A chat is considered empty if it does not contain any messages other than those with 'welcome' tag.
-        """
-        tag_filters = [
-            { "human": ["welcome"] },
-            { "ai": ["welcome"] },
-        ]
+        A chat is considered empty if it does not contain any messages besides tag-filtered messages.
         
+        Example:
+            tag_filters = [
+                { "human": ["welcome"] },
+                { "ai": ["welcome"] },
+            ]
+        """        
         channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
         agent_metatdata = channel_values.get("agent_metadata", {})
         messages = channel_values.get("messages", [])
@@ -133,11 +134,14 @@ class MemoryManager:
             chat_id = checkpoint_tuple.config["configurable"]["thread_id"]
             user_id = checkpoint_tuple.metadata["user_id"]
             
-            logging.debug(f"Processing checkpoint_tuple for chat_id: {chat_id}, user_id: {user_id}")
+            if not chat_id or not user_id:
+                continue
 
             if self._is_empty_chat(checkpoint_tuple):
                 logging.debug(f"Chat_id: {chat_id}, user_id: {user_id} is empty, skipping")
                 continue
+            
+            logging.debug(f"Processing checkpoint_tuple for chat_id: {chat_id}, user_id: {user_id}")
 
             if chat_id not in chat_ids:
                 chat_ids.add(chat_id)
@@ -242,6 +246,12 @@ class MemoryManager:
             filters: A dictionary to filter messages.
         Returns:
             A list of message records.
+            
+        Filters example:
+            tag_filters = [
+                { "human": ["welcome"] },
+                { "ai": ["welcome"] },
+            ]
         """
         rows = []
         
@@ -249,10 +259,7 @@ class MemoryManager:
         config = {"configurable": {"thread_id": chat_id}}
         
         limit = filters.get("limit")
-        defaut_tag_filters = [
-            { "human": ["welcome"] },
-            { "ai": ["welcome"] },
-        ]
+        tag_filters = filters.get("tag_filters", [])
         
         # Collect states in reverse order
         states_list = []
@@ -315,7 +322,7 @@ class MemoryManager:
                         processed_message_ids.append(msg.id)
                         continue
 
-                    if msg.type == 'human' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
+                    if msg.type == 'human' and self._filter_by_tags(tag_filters, tags, msg.type):
                         if user_row is None:
                             text = agent_metadata.get("prompt", "")
                             user_row = {
@@ -328,7 +335,7 @@ class MemoryManager:
                                 "createdAt": msg.additional_kwargs.get("created_at"),
                             }
 
-                    if msg.type == 'ai' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
+                    if msg.type == 'ai' and self._filter_by_tags(tag_filters, tags, msg.type):
                         llm_str = msg.content if msg.content else ""
                         
                         text = llm_str

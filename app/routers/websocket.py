@@ -60,7 +60,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: B
     async with create_agent(llm=llm, websocket=websocket, request_type=RequestType.MESSAGE) as ctx:
         agent = ctx.agent
 
-        config = {
+        base_config = {
             "configurable": {
                 "thread_id": thread_id,
                 "user_id": user_id,
@@ -69,13 +69,13 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: B
 
         if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
             langfuse_handler = CallbackHandler()
-            config["callbacks"] = [langfuse_handler]
+            base_config["callbacks"] = [langfuse_handler]
 
         while True:
             try:
                 request = await websocket.receive_text()
                 request_id = str(uuid.uuid4())
-                
+
                 ws_request = _parse_websocket_request(request)
                 content = ws_request.prompt
                 if ws_request.context:
@@ -84,12 +84,22 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: B
                         context_prompt += f"{key}:{value};"
                     content += context_prompt
 
+                config = {
+                    **base_config,
+                    "configurable": {**base_config["configurable"]},
+                }
+
                 config["configurable"]["request_id"] = request_id
 
                 if ws_request.agent:
                     config["configurable"]["agent"] = ws_request.agent
                 else:
                     config["configurable"]["agent"] = ""
+
+                # Exclude "ephemeral" messages from being stored in memory
+                tags = ws_request.tags or []
+                if "ephemeral" in tags:
+                    config["configurable"]["thread_id"] = None
 
                 input_messages = [{"role": "user", "content": content}]
 

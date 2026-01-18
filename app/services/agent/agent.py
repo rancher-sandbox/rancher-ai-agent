@@ -70,7 +70,7 @@ The output should always be provided in Markdown format.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
 
-SUMMARY_PROMPT = """Each message is a list of recent agent replies to the user. Your task is to generate a concise summary of these replies, focusing on key points and relevant information. Your response will be used to assign a title to a Chat.
+GENERATE_CHAT_NAME_PROMPT = """Each message is a list of recent agent replies to the user. Your task is to generate a concise summary of these replies, focusing on key points and relevant information. Your response will be used to assign a title to a Chat.
 
 ## CORE DIRECTIVES
 
@@ -163,7 +163,7 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
             
         checkpointer = websocket.app.memory_manager.get_checkpointer()
         agent = create_child_agent(llm, tools, _get_system_prompt(request_type), checkpointer)
-        
+
         yield AgentContext(
             agent=agent,
             session=session,
@@ -199,8 +199,8 @@ def _get_system_prompt(type: RequestType) -> str:
         str: The system prompt to be used by the AI agent.
     """
     match type:
-        case RequestType.SUMMARY:
-            return SUMMARY_PROMPT
+        case RequestType.GENERATE_CHAT_NAME_PROMPT:
+            return GENERATE_CHAT_NAME_PROMPT
         case RequestType.MESSAGE:
             prompt = os.environ.get("SYSTEM_PROMPT")
             if prompt:
