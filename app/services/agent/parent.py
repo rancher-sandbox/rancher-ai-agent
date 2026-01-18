@@ -158,7 +158,9 @@ class ParentAgentBuilder:
         response = self.llm.invoke(messages)
 
         # Mark this response explicitly as a summary so that it can be filtered
-        # out by MemoryManager.fetch_messages.
+        # out from the memory endpoints results.
+        # Summary are used to condense the conversation but should not appear
+        # as part of the conversation history.
         if response.additional_kwargs is None:
             response.additional_kwargs = {}
         response.additional_kwargs["is_summary"] = True
