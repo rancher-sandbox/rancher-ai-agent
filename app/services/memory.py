@@ -250,7 +250,7 @@ class MemoryManager:
         
         limit = filters.get("limit")
         defaut_tag_filters = [
-            { "human": ["welcome", "confirmation"] },
+            { "human": ["welcome"] },
             { "ai": ["welcome"] },
         ]
         
