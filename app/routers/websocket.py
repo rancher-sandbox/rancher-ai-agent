@@ -145,8 +145,6 @@ async def stream_agent_response(
     """
 
     await websocket.send_text("<message>")
-
-    mcp_responses = []
     
     async for stream in agent.astream_events(
         input_data,
@@ -158,8 +156,20 @@ async def stream_agent_response(
                 await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
         
         if stream["event"] == "on_custom_event":
-            await websocket.send_text(stream["data"])
+            current_state = await agent.aget_state(config)
+            metadata = current_state.values.get("agent_metadata", {})
+            mcp_responses = metadata.get("mcp_responses", [])
+            if mcp_responses is None:
+                mcp_responses = []
             mcp_responses.append(stream["data"])
+            metadata["mcp_responses"] = mcp_responses
+            
+            await agent.aupdate_state(
+                config,
+                {"agent_metadata": metadata}
+            )
+            
+            await websocket.send_text(stream["data"])
     
         if stream["event"] == "on_chain_stream":
             data = stream.get("data")
@@ -171,7 +181,7 @@ async def stream_agent_response(
                         if interrupts and len(interrupts) > 0:
                             interrupt_value = interrupts[0].value
                             if interrupt_value:
-                                current_state = agent.get_state(config)
+                                current_state = await agent.aget_state(config)
                                 metadata = current_state.values.get("agent_metadata", {})
                                 metadata["last_interrupt"] = interrupt_value
                                 
@@ -181,17 +191,6 @@ async def stream_agent_response(
                                     {"agent_metadata": metadata}
                                 )
                                 await websocket.send_text(interrupt_value)
-
-    # Store MCP responses in agent state
-    if mcp_responses:
-        current_state = agent.get_state(config)
-        metadata = current_state.values.get("agent_metadata", {})
-        metadata["mcp_responses"] = mcp_responses
-        
-        await agent.aupdate_state(
-            config,
-            {"agent_metadata": metadata}
-        )
     
 def _extract_text_from_chunk_content(chunk_content: any) -> str:
     """
