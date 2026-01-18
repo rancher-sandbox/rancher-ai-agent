@@ -4,7 +4,8 @@ import certifi
 
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
-from .routers import websocket, ui
+from .services.memory import create_memory_manager
+from .routers import chat, websocket, ui
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -34,10 +35,14 @@ class SimpleTruststore:
     def set_truststore(self):
         company_cert_path = "/etc/tls/tls.crt"
         output_path = "/combined.crt"
-        truststore_path = self.create_combined(
-            company_cert_path=company_cert_path, output_path=output_path
-        )
-        self.use_truststore(truststore_path=truststore_path)
+
+        if os.path.exists(company_cert_path):
+            truststore_path = self.create_combined(
+                company_cert_path=company_cert_path, output_path=output_path
+            )
+            self.use_truststore(truststore_path=truststore_path)
+        else:
+            logging.warning(f"Company cert not found at {company_cert_path}, skipping truststore setup.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,14 +51,18 @@ async def lifespan(app: FastAPI):
         logging.getLogger().setLevel(LOG_LEVEL)
         if os.environ.get('INSECURE_SKIP_TLS', 'false').lower() != "true":
             SimpleTruststore().set_truststore()
+
+        app.memory_manager = await create_memory_manager()
     except ValueError as e:
         logging.critical(e)
         raise e
     yield
+    await app.memory_manager.destroy()
 
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(websocket.router)
+app.include_router(chat.router)
 
 if os.environ.get("ENABLE_TEST_UI", "").lower() == "true":
     app.include_router(ui.router)

@@ -17,7 +17,6 @@ from langgraph.graph.state import CompiledStateGraph, Checkpointer
 from langchain_core.language_models.chat_models import BaseChatModel
 from ollama import ResponseError
 from langgraph.types import Command
-from langgraph.checkpoint.memory import InMemorySaver
 from typing_extensions import TypedDict, Literal
 from langchain_core.callbacks.manager import dispatch_custom_event
 from dataclasses import dataclass
@@ -157,6 +156,15 @@ class ParentAgentBuilder:
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = self.llm.invoke(messages)
+
+        # Mark this response explicitly as a summary so that it can be filtered
+        # out from the memory endpoints results.
+        # Summary are used to condense the conversation but should not appear
+        # as part of the conversation history.
+        if response.additional_kwargs is None:
+            response.additional_kwargs = {}
+        response.additional_kwargs["is_summary"] = True
+
         new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
         new_messages = new_messages + [response]
 

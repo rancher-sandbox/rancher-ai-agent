@@ -3,3 +3,4 @@ __pycache__/
 ./e2e/pytest_cache
 ./app/__pycache__
 ./app/pytest_cache
+venv

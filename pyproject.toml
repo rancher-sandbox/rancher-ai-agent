@@ -16,6 +16,7 @@ dependencies = [
     "langchain-community>=0.3.30",
     "langfuse>=3.3.4",
     "langgraph>=1.0.0",
+    "langgraph-checkpoint-postgres>=0.1.0",
     "mcp>=1.12.4",
     "unstructured>=0.18.15",
     "unstructured[md]>=0.18.15",
@@ -23,6 +24,7 @@ dependencies = [
     "kubernetes>=34.1.0",
     "fastmcp>=2.13.1",
     "langchain-aws>=1.1.0",
+    "psycopg[binary,pool]>=3.3.2",
 ]
 
 [dependency-groups]

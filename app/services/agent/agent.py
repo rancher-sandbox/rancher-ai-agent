@@ -1,18 +1,19 @@
 import os
 import logging
-from contextlib import asynccontextmanager
 
-from .child import create_child_agent
-from ..rag import fleet_documentation_retriever, rancher_documentation_retriever
-from fastapi import  WebSocket
+from contextlib import asynccontextmanager, AsyncExitStack
+from dataclasses import dataclass
+from fastapi import  WebSocket, Request
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from langgraph.checkpoint.memory import InMemorySaver
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.graph.state import CompiledStateGraph
-from langchain.agents import create_agent
-from langchain.tools import tool
 from langchain_core.language_models.llms import BaseLanguageModel
+
+from .child import create_child_agent
+from .chat import create_chat_agent
+from ..rag import fleet_documentation_retriever, rancher_documentation_retriever
+from ...types import RequestType
 
 RANCHER_AGENT_PROMPT = """You are a helpful and expert AI assistant integrated directly into the Rancher UI. Your primary goal is to assist users in managing their Kubernetes clusters and resources through the Rancher interface. You are a trusted partner, providing clear, confident, and safe guidance.
 
@@ -69,26 +70,62 @@ The output should always be provided in Markdown format.
 Examples: <suggestion>How do I scale a deployment?</suggestion><suggestion>Check the resource usage for this cluster</suggestion><suggestion>Show me the logs for the failing pod</suggestion>
 """
 
-async def create_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
-    """ 
-    TODO multiagent support
-    """
-    return await _create_rancher_core_agent(llm=llm, websocket=websocket)
+GENERATE_CHAT_NAME_PROMPT = """Each message is a list of recent agent replies to the user. Your task is to generate a concise summary of these replies, focusing on key points and relevant information. Your response will be used to assign a title to a Chat.
 
-async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket) -> tuple[CompiledStateGraph, ClientSession, any]:
+## CORE DIRECTIVES
+
+### Summary Focus
+* Focus on user requests FIRST. The summary should reflect what the user asked for.
+* The summary should capture the essence of requests, not what the agent replied.
+  For example:
+    * The user asked for "How is the weather in Florence?"
+        * Good summary: "Weather in Florence"
+        * Bad summary: "Can't answer weather questions"
+
+### Conciseness
+* The summary MUST BE MAX 40 characters.
+* Summarize the content in a brief manner, highlighting only the most important aspects.
+* Avoid unnecessary details or lengthy explanations.
+
+### Consistency
+* DO NOT include greetings or pleasantries in the summary.
+* DO NOT include tags like <message>, </message> or any other keywords between < and >.
+* DO NOT include question marks or suggestions in the summary.
+* DO NOT include periods at the end of the summary.
+* DO NOT include any special characters like '-', '_', or other symbols that humans usually use.
+"""
+
+@dataclass
+class AgentContext:
+    agent: CompiledStateGraph
+    session: ClientSession
+    client_ctx: any
+
+@asynccontextmanager
+async def create_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType):
+    """
+    TODO multiagent support
+
+    Context manager that creates and manages agent lifecycle.
+    """
+    async with _create_rancher_core_agent(llm=llm, websocket=websocket, request_type=request_type) as agent_ctx:
+        yield agent_ctx
+
+@asynccontextmanager
+async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocket, request_type: RequestType):
     """
     Creates a Rancher core agent with MCP client connection.
     
     This function sets up an agent specialized in managing Rancher and Kubernetes resources
     through the Rancher UI. It establishes a connection to the MCP server for tool execution
-    and returns the agent along with the session and client context for proper cleanup.
+    and properly manages the lifecycle of the client connection.
     
     Args:
         llm: The language model to use for the agent.
         websocket: WebSocket connection to extract Rancher URL and authentication token.
     
-    Returns:
-        Tuple of (agent, session, client_ctx) where:
+    Yields:
+        AgentContext containing:
             - agent: The compiled LangGraph agent ready to process requests
             - session: MCP ClientSession that needs to be closed after use
             - client_ctx: MCP client context manager that needs to be closed after use
@@ -102,45 +139,71 @@ async def _create_rancher_core_agent(llm: BaseLanguageModel, websocket: WebSocke
     else:
         mcp_url = "https://" + mcp_url
 
-    client_ctx = streamablehttp_client(
-        url=mcp_url,
-        headers={
-             "R_token": token,
-             "R_url": rancher_url
-        }
-    )
-    
-    read, write, _ = await client_ctx.__aenter__()
-    
-    # Initialize MCP session
-    session = ClientSession(read, write)
-    await session.__aenter__()
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-    
-    # if ENABLE_RAG is true, add the retriever tools to the tools list
-    if os.environ.get("ENABLE_RAG", "false").lower() == "true":
-        tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+    async with AsyncExitStack() as stack:
+        client_ctx = await stack.enter_async_context(
+            streamablehttp_client(
+                url=mcp_url,
+                headers={
+                    "R_token": token,
+                    "R_url": rancher_url
+                }
+            )
+        )
+        
+        read, write, _ = client_ctx
+        session = await stack.enter_async_context(ClientSession(read, write))
+        
+        # Initialize MCP session
+        await session.initialize()
+        tools = await load_mcp_tools(session)
+        
+        # if ENABLE_RAG is true, add the retriever tools to the tools list
+        if os.environ.get("ENABLE_RAG", "false").lower() == "true":
+            tools = [fleet_documentation_retriever, rancher_documentation_retriever] + tools
+            
+        checkpointer = websocket.app.memory_manager.get_checkpointer()
+        agent = create_child_agent(llm, tools, _get_system_prompt(request_type), checkpointer)
 
-    agent = create_child_agent(llm, tools, _get_system_prompt(), InMemorySaver())
-    
-    return agent, session, client_ctx  # Return all three for cleanup
+        yield AgentContext(
+            agent=agent,
+            session=session,
+            client_ctx=client_ctx
+        )
 
-def _get_system_prompt() -> str:
+    # All contexts automatically cleaned up here in reverse order since we used AsyncExitStack
+
+def create_rest_api_agent(request: Request):
+    """
+    Creates a chat agent for REST API endpoints.
+    
+    This is a minimal agent creation for REST API use cases where
+    only reading chat state is needed (no LLM, tools, or MCP).
+    
+    Args:
+        checkpointer: The checkpointer for reading agent state.
+    
+    Returns:
+        CompiledStateGraph: The compiled agent ready to read state.
+    """
+    return create_chat_agent(request.app.memory_manager.get_checkpointer())
+
+def _get_system_prompt(type: RequestType) -> str:
     """
     Retrieves the system prompt for the AI agent.
 
     The function first attempts to get the prompt from an environment variable
     named "SYSTEM_PROMPT". If the environment variable is not set, it returns
-    a default, hard-coded prompt.
+    a default, hard-coded prompt depending on the request type.
 
     Returns:
         str: The system prompt to be used by the AI agent.
     """
-
-    prompt = os.environ.get("SYSTEM_PROMPT")
-    if prompt:
-        return prompt
-    
-    return RANCHER_AGENT_PROMPT
-
+    match type:
+        case RequestType.GENERATE_CHAT_NAME_PROMPT:
+            return GENERATE_CHAT_NAME_PROMPT
+        case RequestType.MESSAGE:
+            prompt = os.environ.get("SYSTEM_PROMPT")
+            if prompt:
+                return prompt
+            
+            return RANCHER_AGENT_PROMPT

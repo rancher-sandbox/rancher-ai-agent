@@ -32,6 +32,9 @@ rag:
 langfuseSecretKey:
 langfusePublicKey:
 langfuseHost:
+storage:
+  enabled: false
+  connectionString: ""
 insecureSkipTls: false
 llmMock:
   enabled: false

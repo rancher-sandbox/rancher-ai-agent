@@ -3,8 +3,6 @@ import uuid
 import logging
 import json
 
-from ..dependencies import get_llm
-from ..services.agent.agent import create_agent
 from dataclasses import dataclass
 from fastapi import APIRouter
 from fastapi import  WebSocket, WebSocketDisconnect, Depends
@@ -13,75 +11,131 @@ from langgraph.graph.state import CompiledStateGraph
 from langfuse.langchain import CallbackHandler
 from langchain_core.language_models.llms import BaseLanguageModel
 
+from ..services.auth import get_user_id
+from ..dependencies import get_llm
+from ..services.agent.agent import create_agent
+from ..types import RequestType
+
 router = APIRouter()
+
+async def get_user_id_from_websocket(websocket: WebSocket) -> str:
+    """
+    Retrieves the user ID from the Rancher API using the session token from the WebSocket cookies.
+    """
+    cookies = websocket.cookies
+    rancher_url = os.environ.get("RANCHER_URL","https://"+websocket.url.hostname)
+    token = os.environ.get("RANCHER_API_TOKEN", cookies.get("R_SESS", ""))
+
+    return await get_user_id(rancher_url, token)
 
 @dataclass
 class WebSocketRequest:
     """Represents a parsed WebSocket request from the client."""
     prompt: str
     context: dict
+    tags: list[str] = None
     agent: str = ""
 
-@router.websocket("/agent/ws")
-async def websocket_endpoint(websocket: WebSocket, llm: BaseLanguageModel = Depends(get_llm)):
+@router.websocket("/agent/ws/messages")
+@router.websocket("/agent/ws/messages/{thread_id}")
+async def websocket_endpoint(websocket: WebSocket, thread_id: str = None, llm: BaseLanguageModel = Depends(get_llm)):
     """
     WebSocket endpoint for the agent.
     
     Accepts a WebSocket connection, sets up the agent and
     handles the back-and-forth communication with the client.
     """
-    await websocket.accept()
-    logging.debug("ws connection opened")
-    agent, session, client_ctx = await create_agent(llm=llm, websocket=websocket)
-    thread_id = str(uuid.uuid4())
-            
-    config = {
-        "thread_id": thread_id,
-    }
-    if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
-        langfuse_handler = CallbackHandler()
-        config["callbacks"] = [langfuse_handler]
-
-    while True:
-        try:
-            request = await websocket.receive_text()
-            
-            ws_request = _parse_websocket_request(request)
-            if ws_request.context:
-                context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
-                for key, value in ws_request.context.items():
-                    context_prompt += f"{key}:{value};"
-                ws_request.prompt += context_prompt
-            if ws_request.agent:
-                config["agent"] = ws_request.agent
-            else:
-                config["agent"] = ""
-
-            await stream_agent_response(
-                agent=agent,
-                input_data={"messages": [{"role": "user", "content": ws_request.prompt}]},
-                config=config,
-                websocket=websocket)
-        except WebSocketDisconnect:
-            logging.info(f"Client {websocket.client.host} disconnected.")
-            break
-        except Exception as e:
-            logging.error(f"An error occurred: {e}", exc_info=True)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
-            else:
-                break
-        finally:
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_text("</message>")
     
-    # Clean up MCP session and client. Each user requires their own session for token-based authentication.
-    # TODO: Remove per-user sessions once OAuth 2.0 is implemented.
-    try:
-        await session.__aexit__(None, None, None)
-        await client_ctx.__aexit__(None, None, None)
-    except Exception as e:
-        logging.error(f"Error during mcp session and client cleanup: {e}", exc_info=True)
+    user_id = await get_user_id_from_websocket(websocket)
+    
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+    logging.debug(f"Starting websocket session with thread_id: {thread_id}, user_id: {user_id}")
+    
+    await websocket.accept()
+    logging.debug("ws/messages connection opened")
+    
+    await websocket.send_text(f'<chat-metadata>{{"chatId": "{thread_id}"}}</chat-metadata>')
+
+    async with create_agent(llm=llm, websocket=websocket, request_type=RequestType.MESSAGE) as ctx:
+        agent = ctx.agent
+
+        base_config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "user_id": user_id,
+            },
+        }
+
+        if os.environ.get("LANGFUSE_SECRET_KEY") and os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_HOST"):
+            langfuse_handler = CallbackHandler()
+            base_config["callbacks"] = [langfuse_handler]
+
+        while True:
+            try:
+                request = await websocket.receive_text()
+                request_id = str(uuid.uuid4())
+
+                ws_request = _parse_websocket_request(request)
+                content = ws_request.prompt
+                if ws_request.context:
+                    context_prompt = ". Use the following parameters to populate tool calls when appropriate. \n Only include parameters relevant to the user's request (e.g., omit namespace for cluster-wide operations). \n Parameters (separated by ;): \n "
+                    for key, value in ws_request.context.items():
+                        context_prompt += f"{key}:{value};"
+                    content += context_prompt
+
+                config = {
+                    **base_config,
+                    "configurable": {**base_config["configurable"]},
+                }
+
+                config["configurable"]["request_id"] = request_id
+
+                if ws_request.agent:
+                    config["configurable"]["agent"] = ws_request.agent
+                else:
+                    config["configurable"]["agent"] = ""
+
+                # Exclude "ephemeral" messages from being stored in memory
+                tags = ws_request.tags or []
+                if "ephemeral" in tags:
+                    config["configurable"]["thread_id"] = None
+
+                input_messages = [{"role": "user", "content": content}]
+
+                input_data = {
+                    "messages": input_messages,
+                    "agent_metadata": {
+                        "prompt": ws_request.prompt,
+                        "context": ws_request.context,
+                        "tags": ws_request.tags,
+                        "mcp_responses": [],
+                    },
+                }
+
+                await stream_agent_response(
+                    agent=agent,
+                    input_data=input_data,
+                    config=config,
+                    websocket=websocket)
+                
+            except WebSocketDisconnect:
+                logging.info(f"Client {websocket.client.host} disconnected.")
+
+                break
+            except Exception as e:
+                logging.error(f"An error occurred: {e}", exc_info=True)
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text(f'<error>{{"message": "{str(e)}"}}</error>')
+                else:
+                    break
+            finally:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text("</message>")
+
+    # TODO: any additional cleanup if necessary and changes to support OAuth 2
+    # - Clean up MCP session and client if needed.
+    # - Each user requires their own session for token-based authentication.
 
 async def stream_agent_response(
     agent: CompiledStateGraph,
@@ -101,6 +155,7 @@ async def stream_agent_response(
     """
 
     await websocket.send_text("<message>")
+    
     async for stream in agent.astream_events(
         input_data,
         config=config,
@@ -111,6 +166,19 @@ async def stream_agent_response(
                 await websocket.send_text(_extract_text_from_chunk_content(stream["data"]["chunk"].content))
         
         if stream["event"] == "on_custom_event":
+            current_state = await agent.aget_state(config)
+            metadata = current_state.values.get("agent_metadata", {})
+            mcp_responses = metadata.get("mcp_responses", [])
+            if mcp_responses is None:
+                mcp_responses = []
+            mcp_responses.append(stream["data"])
+            metadata["mcp_responses"] = mcp_responses
+            
+            await agent.aupdate_state(
+                config,
+                {"agent_metadata": metadata}
+            )
+            
             await websocket.send_text(stream["data"])
     
         if stream["event"] == "on_chain_stream":
@@ -123,6 +191,15 @@ async def stream_agent_response(
                         if interrupts and len(interrupts) > 0:
                             interrupt_value = interrupts[0].value
                             if interrupt_value:
+                                current_state = await agent.aget_state(config)
+                                metadata = current_state.values.get("agent_metadata", {})
+                                metadata["last_interrupt"] = interrupt_value
+                                
+                                # Store interrupt in agent state
+                                await agent.aupdate_state(
+                                    config,
+                                    {"agent_metadata": metadata}
+                                )
                                 await websocket.send_text(interrupt_value)
     
 def _extract_text_from_chunk_content(chunk_content: any) -> str:
@@ -166,7 +243,8 @@ def _parse_websocket_request(request: str) -> WebSocketRequest:
         return WebSocketRequest(
             prompt=json_request.get("prompt", ""),
             context=json_request.get("context", {}),
+            tags = json_request.get("tags", []),
             agent=json_request.get("agent", "")
         )
     except json.JSONDecodeError:
-        return WebSocketRequest(prompt=request, context={}, agent="")
+        return WebSocketRequest(prompt=request, context={}, tags=[], agent="")
