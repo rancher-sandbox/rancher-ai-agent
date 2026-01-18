@@ -254,19 +254,14 @@ class MemoryManager:
             { "ai": ["welcome"] },
         ]
         
-        # Collect states grouped by request_id in reverse order
+        # Collect states in reverse order
         states_list = []
         async for state in stateGraph.aget_state_history(config, filter={"user_id": user_id}):
-            # Filter by user_id and skip summarization snapshots (which contain only a summary)
-            if state.metadata.get("user_id") == user_id:
-                values = getattr(state, "values", {}) or {}
-                if "summary" in values:
-                    continue
-                states_list.append(state)
+            states_list.insert(0, state)
 
         # Group states by request_id
         states_dict = {}
-        for state in reversed(states_list):
+        for state in states_list:
             if state and state.values and state.metadata:
                 state_request_id = state.metadata.get("request_id")
                 if state_request_id:
@@ -310,11 +305,16 @@ class MemoryManager:
                 agent_metadata = state.values.get("agent_metadata", {})
                 context = agent_metadata.get("context", {})
                 tags = agent_metadata.get("tags", [])
-                
+
                 # Filter out already processed messages
                 messages = [m for m in state.values.get("messages", []) if hasattr(m, "id") and m.id not in processed_message_ids]
 
                 for msg in messages:
+                    # Skip internal summary messages, marked at creation time in agent/parent.py and agent/child.py
+                    if getattr(msg, "additional_kwargs", {}).get("is_summary"):
+                        processed_message_ids.append(msg.id)
+                        continue
+
                     if msg.type == 'human' and self._filter_by_tags(defaut_tag_filters, tags, msg.type):
                         if user_row is None:
                             text = agent_metadata.get("prompt", "")

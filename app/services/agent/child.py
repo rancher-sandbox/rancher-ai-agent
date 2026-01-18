@@ -60,6 +60,13 @@ class ChildAgentBuilder:
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = self.llm_with_tools.invoke(messages)
+
+        # Mark this response explicitly as a summary so that it can be filtered
+        # out by MemoryManager.fetch_messages.
+        if response.additional_kwargs is None:
+            response.additional_kwargs = {}
+        response.additional_kwargs["is_summary"] = True
+
         new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
         new_messages = new_messages + [response]
 

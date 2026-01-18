@@ -127,7 +127,7 @@ class ParentAgentBuilder:
         messages = state["messages"]
         last_message = messages[-1]
         if not last_message.tool_calls:
-            if len(messages) > 7: ## TODO check tokens not len messages!
+            if len(messages) > 7: ## TODO check tokens not len messages and exclude 'welcome' messages!
                 return "summarize_conversation"
             return "end"
         else:
@@ -156,6 +156,13 @@ class ParentAgentBuilder:
 
         messages = state["messages"] + [HumanMessage(content=summary_message)]
         response = self.llm.invoke(messages)
+
+        # Mark this response explicitly as a summary so that it can be filtered
+        # out by MemoryManager.fetch_messages.
+        if response.additional_kwargs is None:
+            response.additional_kwargs = {}
+        response.additional_kwargs["is_summary"] = True
+
         new_messages = [RemoveMessage(id=m.id) for m in messages[:-2]]
         new_messages = new_messages + [response]
 
